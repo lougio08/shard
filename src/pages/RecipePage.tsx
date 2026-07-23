@@ -1,0 +1,940 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ShardAutocomplete, RecipeCountBadge, SearchFilterInput, ShardDisplay, DropdownButton } from "../components";
+import { getRarityColor, formatLargeNumber, loadBazaarCache, getTreeBuyNodes, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectVolatileShards } from "../utilities";
+import { useFusionData, useDropdownManager, useRecipeState } from "../hooks";
+import { processOutputRecipes, categorizeAndGroupRecipes, filterCategorizedRecipes, type Recipe, type CategorizedRecipes, type GroupedRecipe, type FusionData } from "../utilities";
+import { DataService } from "../services/dataService";
+import { CalculationService } from "../services/calculationService";
+import { TrendingUp, TrendingDown, ShieldCheck, AlertTriangle } from "lucide-react";
+import type { ShardWithKey, PriceInfo, Data, RecipeChoice } from "../types/types";
+
+const MIN_BUY_VOLUME = 3000;
+const MIN_SELL_VOLUME = 1000;
+
+function getInputRecipes(shard: ShardWithKey, fusionData: FusionData): Recipe[] {
+  const recipes: Recipe[] = [];
+  Object.entries(fusionData.recipes).forEach(([outputShardId, recipeData]) => {
+    Object.entries(recipeData).forEach(([quantityStr, recipeList]) => {
+      const outputQuantity = parseInt(quantityStr, 10);
+      recipeList.forEach((recipe) => {
+        if (recipe.length === 2) {
+          const [input1, input2] = recipe;
+          if (input1 === shard.key || input2 === shard.key) {
+            recipes.push({ input1, input2, quantity: outputQuantity, output: outputShardId });
+          }
+        }
+      });
+    });
+  });
+  return recipes;
+}
+
+type RecipeMode = "input" | "output" | null;
+
+export const RecipePage = () => {
+  const { selectedShard, setSelectedShard, selectedOutputShard, setSelectedOutputShard } = useRecipeState();
+  const { fusionData, loading } = useFusionData();
+
+  const [searchValue, setSearchValue] = useState("");
+  const [outputSearchValue, setOutputSearchValue] = useState("");
+  const [filterValue, setFilterValue] = useState("");
+
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [categorizedRecipes, setCategorizedRecipes] = useState<CategorizedRecipes>({
+    special: [],
+    id: [],
+    chameleon: [],
+  });
+  const [mode, setMode] = useState<RecipeMode>(null);
+
+  const [groupSelectionIndex, setGroupSelectionIndex] = useState<{ [groupKey: string]: number }>({});
+  const [dropdownSearch, setDropdownSearch] = useState<{ [dropdownId: string]: string }>({});
+  const groupDropdowns = useDropdownManager();
+
+  const [profitSearchValue, setProfitSearchValue] = useState("");
+  const [selectedProfitShard, setSelectedProfitShard] = useState<ShardWithKey | null>(null);
+  const [profitData, setProfitData] = useState<{
+    profit: number;
+    margin: number;
+    craftCost: number;
+    outputShard: string;
+    outputQty: number;
+    otherInput: string;
+    sellRevenue: number;
+  } | null>(null);
+  const [profitLoading, setProfitLoading] = useState(false);
+  const [filterLowVolume, setFilterLowVolume] = useState(true);
+  const [filterVolatile, setFilterVolatile] = useState(true);
+  const [buyMode, setBuyMode] = useState<"order" | "instant">("order");
+  const [sellMode, setSellMode] = useState<"order" | "instant">("order");
+
+  const cachedPricesRef = useRef<Record<string, PriceInfo> | null>(null);
+  const cachedDataRef = useRef<Data | null>(null);
+  const cachedChoicesRef = useRef<Map<string, RecipeChoice> | null>(null);
+  const cachedCycleNodesRef = useRef<string[][]>([]);
+  const cachedShardRef = useRef<string | null>(null);
+
+  const recalcProfitFromCache = useCallback(() => {
+    const prices = cachedPricesRef.current;
+    const data = cachedDataRef.current;
+    const choices = cachedChoicesRef.current;
+    const cycleNodes = cachedCycleNodesRef.current;
+    const shardKey = cachedShardRef.current;
+    if (!prices || !data || !choices || !shardKey || !fusionData) return;
+
+    let bestProfit = -Infinity;
+    let bestResult: {
+      outputShard: string;
+      outputQty: number;
+      otherInput: string;
+      craftCost: number;
+      sellRevenue: number;
+    } | null = null;
+
+    const params = DEFAULT_CALCULATION_PARAMS;
+    const service = CalculationService.getInstance();
+
+    for (const [outputShardId] of Object.entries(fusionData.recipes)) {
+      const priceInfo = prices[outputShardId];
+      if (!priceInfo) continue;
+      const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
+      if (effectiveSellRevenue <= 0) continue;
+
+      const choice = choices.get(outputShardId);
+      if (!choice || choice.recipe === null) continue;
+
+      const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
+      const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params);
+      service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
+      const stats = service.collectTreeStats(tree, params);
+
+      if (filterLowVolume || filterVolatile) {
+        const buyNodes = getTreeBuyNodes(tree);
+        if (filterLowVolume) {
+          const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+          let volumeFailed = !outputVolumeOk;
+          if (!volumeFailed) {
+            for (const nodeId of buyNodes) {
+              const nodePrice = prices[nodeId];
+              if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
+                volumeFailed = true;
+                break;
+              }
+            }
+          }
+          if (volumeFailed) continue;
+        }
+        if (filterVolatile) {
+          const cached = loadBazaarCache();
+          const previousPrices = cached?.prices ?? null;
+          const volatileShardIds = detectVolatileShards(prices, previousPrices);
+          let volatileFailed = volatileShardIds.has(outputShardId);
+          if (!volatileFailed) {
+            for (const nodeId of buyNodes) {
+              if (volatileShardIds.has(nodeId)) {
+                volatileFailed = true;
+                break;
+              }
+            }
+          }
+          if (volatileFailed) continue;
+        }
+      }
+
+      let totalMatCost = 0;
+      let allMaterialsPriced = true;
+      stats.totalQuantities.forEach((qty, matId) => {
+        const matPriceInfo = prices[matId];
+        const matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+        if (matPrice === undefined || matPrice === null || matPrice <= 0) {
+          allMaterialsPriced = false;
+        }
+        totalMatCost += qty * (matPrice ?? 0);
+      });
+      if (!allMaterialsPriced || stats.totalQuantities.size === 0) continue;
+
+      const craftCost = totalMatCost;
+      const sellRevenue = effectiveSellRevenue * outputQty;
+      const profit = sellRevenue - craftCost;
+
+      if (profit > bestProfit) {
+        bestProfit = profit;
+        bestResult = {
+          outputShard: outputShardId,
+          outputQty,
+          otherInput: tree.method === "recipe"
+            ? (tree.inputs[0].shard === shardKey ? tree.inputs[1].shard : tree.inputs[0].shard)
+            : (choice.recipe.inputs[0] === shardKey ? choice.recipe.inputs[1] : choice.recipe.inputs[0]),
+          craftCost,
+          sellRevenue,
+        };
+      }
+    }
+
+    if (!bestResult) {
+      setProfitData(null);
+      return;
+    }
+
+    const profit = bestResult.sellRevenue - bestResult.craftCost;
+    const margin = bestResult.craftCost > 0 ? (profit / bestResult.craftCost) * 100 : 0;
+
+    setProfitData({
+      profit,
+      margin,
+      craftCost: bestResult.craftCost,
+      outputShard: bestResult.outputShard,
+      outputQty: bestResult.outputQty,
+      otherInput: bestResult.otherInput,
+      sellRevenue: bestResult.sellRevenue,
+    });
+  }, [fusionData, filterLowVolume, filterVolatile, buyMode, sellMode]);
+
+  const calculateProfitFull = useCallback(async (shard: ShardWithKey) => {
+    if (!fusionData) return;
+    let isCancelled = false;
+    setProfitLoading(true);
+    try {
+      const dataService = DataService.getInstance();
+      const shards = await dataService.loadShards();
+      const skyCoflPrices = await dataService.fetchSkyCoflBazaarPrices(shards);
+
+      const ratesResponse = await fetch(`${import.meta.env.BASE_URL}rates.json`);
+      const defaultRates = await ratesResponse.json();
+
+      const data = buildDataFromFusionData(fusionData, defaultRates);
+
+      const prices: Record<string, PriceInfo> = {};
+      for (const shard of shards) {
+        const snapshot = skyCoflPrices[shard.id];
+        if (snapshot && snapshot.buyPrice > 0 && snapshot.sellPrice > 0) {
+          prices[shard.id] = {
+            buyCost: snapshot.sellPrice,
+            sellRevenue: snapshot.buyPrice,
+            buyVolume: snapshot.buyVolume ?? 0,
+            sellVolume: snapshot.sellVolume ?? 0,
+            dailyBuyVolume: (snapshot.buyMovingWeek ?? 0) > 0 ? snapshot.buyMovingWeek / 7 : (snapshot.buyVolume ?? 0),
+            dailySellVolume: (snapshot.sellMovingWeek ?? 0) > 0 ? snapshot.sellMovingWeek / 7 : (snapshot.sellVolume ?? 0),
+          };
+        }
+      }
+
+      const params = DEFAULT_CALCULATION_PARAMS;
+
+      const service = CalculationService.getInstance();
+      const { choices } = service.computeMinCosts(data, params);
+      const cycleNodes = service.findCycleNodes(choices);
+
+      cachedPricesRef.current = prices;
+      cachedDataRef.current = data;
+      cachedChoicesRef.current = choices;
+      cachedCycleNodesRef.current = cycleNodes;
+      cachedShardRef.current = shard.key;
+
+      let bestProfit = -Infinity;
+      let bestResult: {
+        outputShard: string;
+        outputQty: number;
+        otherInput: string;
+        craftCost: number;
+        sellRevenue: number;
+      } | null = null;
+
+      const cached = loadBazaarCache();
+      const previousPrices = cached?.prices ?? null;
+      const volatileShardIds = detectVolatileShards(prices, previousPrices);
+
+      for (const [outputShardId] of Object.entries(fusionData.recipes)) {
+        const priceInfo = prices[outputShardId];
+        if (!priceInfo) continue;
+        const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
+        if (effectiveSellRevenue <= 0) continue;
+
+        const choice = choices.get(outputShardId);
+        if (!choice || choice.recipe === null) continue;
+
+        const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
+        const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params);
+        service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
+        const stats = service.collectTreeStats(tree, params);
+
+        if (filterLowVolume || filterVolatile) {
+          const buyNodes = getTreeBuyNodes(tree);
+          if (filterLowVolume) {
+            const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+            let volumeFailed = !outputVolumeOk;
+            if (!volumeFailed) {
+              for (const nodeId of buyNodes) {
+                const nodePrice = prices[nodeId];
+                if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
+                  volumeFailed = true;
+                  break;
+                }
+              }
+            }
+            if (volumeFailed) continue;
+          }
+          if (filterVolatile) {
+            let volatileFailed = volatileShardIds.has(outputShardId);
+            if (!volatileFailed) {
+              for (const nodeId of buyNodes) {
+                if (volatileShardIds.has(nodeId)) {
+                  volatileFailed = true;
+                  break;
+                }
+              }
+            }
+            if (volatileFailed) continue;
+          }
+        }
+
+        let totalMatCost = 0;
+        let allMaterialsPriced = true;
+        stats.totalQuantities.forEach((qty, matId) => {
+          const matPriceInfo = prices[matId];
+          const matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+          if (matPrice === undefined || matPrice === null || matPrice <= 0) {
+            allMaterialsPriced = false;
+          }
+          totalMatCost += qty * (matPrice ?? 0);
+        });
+        if (!allMaterialsPriced || stats.totalQuantities.size === 0) continue;
+
+        const craftCost = totalMatCost;
+        const sellRevenue = effectiveSellRevenue * outputQty;
+        const profit = sellRevenue - craftCost;
+
+        if (profit > bestProfit) {
+          bestProfit = profit;
+          bestResult = {
+            outputShard: outputShardId,
+            outputQty,
+            otherInput: tree.method === "recipe"
+              ? (tree.inputs[0].shard === shard.key ? tree.inputs[1].shard : tree.inputs[0].shard)
+              : (choice.recipe.inputs[0] === shard.key ? choice.recipe.inputs[1] : choice.recipe.inputs[0]),
+            craftCost,
+            sellRevenue,
+          };
+        }
+      }
+
+      if (!bestResult) {
+        if (!isCancelled) setProfitData(null);
+        return;
+      }
+
+      const profit = bestResult.sellRevenue - bestResult.craftCost;
+      const margin = bestResult.craftCost > 0 ? (profit / bestResult.craftCost) * 100 : 0;
+
+      if (!isCancelled) {
+        setProfitData({
+          profit,
+          margin,
+          craftCost: bestResult.craftCost,
+          outputShard: bestResult.outputShard,
+          outputQty: bestResult.outputQty,
+          otherInput: bestResult.otherInput,
+          sellRevenue: bestResult.sellRevenue,
+        });
+      }
+    } catch {
+      if (!isCancelled) setProfitData(null);
+    } finally {
+      if (!isCancelled) setProfitLoading(false);
+    }
+  }, [fusionData, filterLowVolume, filterVolatile, buyMode, sellMode]);
+
+  useEffect(() => {
+    if (selectedProfitShard) {
+      const shardChanged = cachedShardRef.current !== selectedProfitShard.key;
+      if (shardChanged) {
+        calculateProfitFull(selectedProfitShard);
+      } else {
+        setProfitLoading(true);
+        recalcProfitFromCache();
+        setProfitLoading(false);
+      }
+    }
+    return () => {};
+  }, [filterLowVolume, filterVolatile, selectedProfitShard, calculateProfitFull, recalcProfitFromCache]);
+
+  useEffect(() => {
+    if (!fusionData) {
+      setRecipes([]);
+      setCategorizedRecipes({ special: [], id: [], chameleon: [] });
+      setMode(null);
+      return;
+    }
+
+    let newRecipes: Recipe[] = [];
+    let newMode: RecipeMode = null;
+
+    if (selectedShard && !selectedOutputShard) {
+      newRecipes = getInputRecipes(selectedShard, fusionData);
+      newMode = "input";
+    } else if (selectedOutputShard && !selectedShard) {
+      newRecipes = processOutputRecipes(selectedOutputShard, fusionData);
+      newMode = "output";
+    }
+
+    setRecipes(newRecipes);
+    setMode(newMode);
+
+    if (newRecipes.length > 0) {
+      setCategorizedRecipes(categorizeAndGroupRecipes(newRecipes, fusionData));
+    } else {
+      setCategorizedRecipes({ special: [], id: [], chameleon: [] });
+    }
+  }, [selectedShard, selectedOutputShard, fusionData]);
+
+  const handleShardSelect = (shard: ShardWithKey) => {
+    setMode("input");
+    setSelectedShard(shard);
+    setSelectedOutputShard(null);
+    setOutputSearchValue("");
+    setFilterValue("");
+  };
+
+  const handleOutputShardSelect = (shard: ShardWithKey) => {
+    setMode("output");
+    setSelectedOutputShard(shard);
+    setSelectedShard(null);
+    setSearchValue("");
+    setFilterValue("");
+  };
+
+  const handleSearchInputFocus = () => searchValue && setSearchValue("");
+  const handleOutputSearchInputFocus = () => outputSearchValue && setOutputSearchValue("");
+
+  const handleProfitShardSelect = (shard: ShardWithKey) => {
+    setSelectedProfitShard(shard);
+    setProfitData(null);
+  };
+
+  const handleProfitSearchInputFocus = () => profitSearchValue && setProfitSearchValue("");
+
+  if (loading && !fusionData) {
+    return (
+      <div className="min-h-screen">
+        <div className="w-full border-b border-slate-700/30">
+          <div className="px-4 py-4 flex justify-center">
+            <div className="w-full max-w-lg">
+              <ShardAutocomplete
+                value={searchValue}
+                onChange={setSearchValue}
+                onSelect={handleShardSelect}
+                onFocus={handleSearchInputFocus}
+                placeholder="Search for a shard..."
+                className="w-full text-sm py-2 px-3"
+                searchMode="name-only"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-center py-16">
+          <div className="w-8 h-8 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!fusionData) return null;
+
+  const filteredCategories = filterCategorizedRecipes(categorizedRecipes, filterValue, fusionData);
+  const totalGroupBlocks = filteredCategories.special.length + filteredCategories.id.length + filteredCategories.chameleon.length;
+
+  const renderCategory = (groups: GroupedRecipe[], fusionType: "special" | "id" | "chameleon", heading: string, sub: string, colorClass: string) => {
+    if (!groups.length) return null;
+
+    return (
+      <div className="space-y-3 flex justify-center flex-col">
+        <div className="text-center">
+          <h3 className={`text-lg font-semibold ${colorClass} mb-1`}>{heading}</h3>
+          <p className="text-sm text-slate-400">{sub}</p>
+        </div>
+        <div
+          className={
+            `inline-grid gap-5 bg-slate-700/50 border border-slate-600/50 rounded-md p-2 lg:p-3 max-w-fit mx-auto truncate` +
+            (groups.length === 1 ? "grid-cols-1 w-fit" : "grid-cols-1 lg:grid-cols-2 lg:gap-x-10 w-full")
+          }
+        >
+          {groups.map((group, idx) => {
+            const gKey = `${fusionType}-${idx}`;
+
+            // Matrix group (both sides variable, all combinations present)
+            if (group.matrix && group.variantLeft && group.variantRight) {
+              const outputId = group.output || group.recipes[0].output;
+
+              // Get unique quantities in this matrix group
+              const quantities = [...new Set(group.recipes.map((r) => r.quantity))];
+              const hasMultipleQuantities = quantities.length > 1;
+
+              // Matrix group uses dropdowns for both sides
+              const leftDropdownId = `${gKey}-left`;
+              const rightDropdownId = `${gKey}-right`;
+              const selectedLeftIndex = groupSelectionIndex[`${gKey}-left`] || 0;
+              const selectedRightIndex = groupSelectionIndex[`${gKey}-right`] || 0;
+              const currentLeft = group.variantLeft[selectedLeftIndex];
+              const currentRight = group.variantRight[selectedRightIndex];
+              // Search state for dropdowns
+              const leftSearch = dropdownSearch[leftDropdownId] || "";
+              const rightSearch = dropdownSearch[rightDropdownId] || "";
+              const filteredLeft = group.variantLeft!.filter((id) => !leftSearch || fusionData.shards[id]?.name.toLowerCase().includes(leftSearch.toLowerCase()));
+              const filteredRight = group.variantRight!.filter((id) => !rightSearch || fusionData.shards[id]?.name.toLowerCase().includes(rightSearch.toLowerCase()));
+
+              return (
+                <div key={gKey} className="px-2">
+                  <div className="flex flex-wrap items-center gap-2 lg:gap-3 min-w-0 min-h-[40px]">
+                    {/* Left side dropdown */}
+                    <div className="relative" ref={(el) => groupDropdowns.setRef(leftDropdownId, el)}>
+                      <DropdownButton
+                        isOpen={groupDropdowns.dropdownOpen[leftDropdownId]}
+                        onClick={() => groupDropdowns.toggleDropdown(leftDropdownId)}
+                        className="min-w-[120px] bg-slate-600 border-slate-500 text-white"
+                      >
+                        <ShardDisplay shardId={currentLeft} fusionData={fusionData} tooltipVisible={false} />
+                      </DropdownButton>
+                      {groupDropdowns.dropdownOpen[leftDropdownId] && (
+                        <div className="absolute z-50 top-full mt-1 left-0 bg-slate-900 border border-slate-600 rounded shadow-xl max-h-64 min-w-max flex flex-col">
+                          <input
+                            type="text"
+                            className="bg-slate-800 text-white px-3 py-2 text-sm border-b border-slate-700 outline-none"
+                            placeholder="Search..."
+                            value={leftSearch}
+                            onChange={(e) => setDropdownSearch((s) => ({ ...s, [leftDropdownId]: e.target.value }))}
+                            autoFocus
+                          />
+                          <div className="overflow-auto max-h-48">
+                            {filteredLeft.map((shardId) => (
+                              <button
+                                key={shardId}
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-600 text-sm"
+                                onClick={() => {
+                                  setGroupSelectionIndex((p) => ({
+                                    ...p,
+                                    [`${gKey}-left`]: group.variantLeft!.indexOf(shardId),
+                                  }));
+                                  groupDropdowns.closeDropdown(leftDropdownId);
+                                  setDropdownSearch((s) => ({ ...s, [leftDropdownId]: "" }));
+                                }}
+                              >
+                                <ShardDisplay shardId={shardId} fusionData={fusionData} tooltipVisible={false} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <span className="text-purple-400">+</span>
+
+                    {/* Right side dropdown */}
+                    <div className="relative" ref={(el) => groupDropdowns.setRef(rightDropdownId, el)}>
+                      <DropdownButton
+                        isOpen={groupDropdowns.dropdownOpen[rightDropdownId]}
+                        onClick={() => groupDropdowns.toggleDropdown(rightDropdownId)}
+                        className="min-w-[120px] bg-slate-600 border-slate-500 text-white"
+                      >
+                        <ShardDisplay shardId={currentRight} fusionData={fusionData} tooltipVisible={false} />
+                      </DropdownButton>
+                      {groupDropdowns.dropdownOpen[rightDropdownId] && (
+                        <div className="absolute z-50 top-full mt-1 left-0 bg-slate-900 border border-slate-600 rounded shadow-xl max-h-64 min-w-max flex flex-col">
+                          <input
+                            type="text"
+                            className="bg-slate-800 text-white px-3 py-2 text-sm border-b border-slate-700 outline-none"
+                            placeholder="Search..."
+                            value={rightSearch}
+                            onChange={(e) => setDropdownSearch((s) => ({ ...s, [rightDropdownId]: e.target.value }))}
+                            autoFocus
+                          />
+                          <div className="overflow-auto max-h-48">
+                            {filteredRight.map((shardId) => (
+                              <button
+                                key={shardId}
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-600 text-sm"
+                                onClick={() => {
+                                  setGroupSelectionIndex((p) => ({
+                                    ...p,
+                                    [`${gKey}-right`]: group.variantRight!.indexOf(shardId),
+                                  }));
+                                  groupDropdowns.closeDropdown(rightDropdownId);
+                                  setDropdownSearch((s) => ({ ...s, [rightDropdownId]: "" }));
+                                }}
+                              >
+                                <ShardDisplay shardId={shardId} fusionData={fusionData} tooltipVisible={false} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <span className="text-purple-400">=</span>
+
+                    {/* Output display */}
+                    {hasMultipleQuantities ? (
+                      <div className="flex items-center gap-1">
+                        <ShardDisplay shardId={outputId} fusionData={fusionData} tooltipVisible={false} />
+                        <span className="text-xs text-slate-400">({quantities.sort((a, b) => b - a).join("/")})x</span>
+                      </div>
+                    ) : (
+                      <ShardDisplay shardId={outputId} quantity={quantities[0]} fusionData={fusionData} />
+                    )}
+
+                    <span className="text-xs text-slate-400 ml-1">({group.recipes.length} recipes)</span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (group.isGroup) {
+              const selectedIdx = groupSelectionIndex[gKey] || 0;
+              const activeRecipe = group.recipes[selectedIdx];
+              const leftCommon = group.commonPosition === "input1";
+              const rightCommon = group.commonPosition === "input2";
+
+              const renderVariantDropdown = (side: "left" | "right") => {
+                const shardList = [...new Set(group.recipes.map((r) => (side === "left" ? r.input1 : r.input2)))];
+                const dropdownId = `${gKey}-${side}`;
+                const currentShard = side === "left" ? activeRecipe.input1 : activeRecipe.input2;
+                const search = dropdownSearch[dropdownId] || "";
+                const filteredList = shardList.filter((id) => !search || fusionData.shards[id]?.name.toLowerCase().includes(search.toLowerCase()));
+                return (
+                  <div className="relative" ref={(el) => groupDropdowns.setRef(dropdownId, el)}>
+                    <DropdownButton
+                      isOpen={groupDropdowns.dropdownOpen[dropdownId]}
+                      onClick={() => groupDropdowns.toggleDropdown(dropdownId)}
+                      className="min-w-[120px] bg-slate-600 border-slate-500 text-white"
+                    >
+                      <ShardDisplay shardId={currentShard} fusionData={fusionData} tooltipVisible={false} />
+                    </DropdownButton>
+                    {groupDropdowns.dropdownOpen[dropdownId] && (
+                      <div className="absolute z-50 top-full mt-1 left-0 bg-slate-900 border border-slate-600 rounded shadow-xl max-h-64 min-w-max flex flex-col">
+                        <input
+                          type="text"
+                          className="bg-slate-800 text-white px-3 py-2 text-sm border-b border-slate-700 outline-none"
+                          placeholder="Search..."
+                          value={search}
+                          onChange={(e) => setDropdownSearch((s) => ({ ...s, [dropdownId]: e.target.value }))}
+                          autoFocus
+                        />
+                        <div className="overflow-auto max-h-48">
+                          {filteredList.map((shardId) => {
+                            const recipeIdx = group.recipes.findIndex((r) => (side === "left" ? r.input1 : r.input2) === shardId);
+                            return (
+                              <button
+                                key={shardId}
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-600 text-sm"
+                                onClick={() => {
+                                  setGroupSelectionIndex((p) => ({ ...p, [gKey]: recipeIdx }));
+                                  groupDropdowns.closeDropdown(dropdownId);
+                                  setDropdownSearch((s) => ({ ...s, [dropdownId]: "" }));
+                                }}
+                              >
+                                <ShardDisplay shardId={shardId} fusionData={fusionData} tooltipVisible={false} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
+              let actualOutput = "";
+              if (mode === "output" && selectedOutputShard) {
+                actualOutput = selectedOutputShard.key;
+              } else if (mode === "input") {
+                actualOutput = activeRecipe.output;
+              } else if (activeRecipe.output) {
+                actualOutput = activeRecipe.output;
+              }
+
+              return (
+                <div key={gKey} className="px-2">
+                  <div className="flex flex-wrap items-center gap-2 lg:gap-3 min-w-0 min-h-[40px]">
+                    {leftCommon ? <ShardDisplay shardId={group.commonShard} fusionData={fusionData} tooltipVisible={false} /> : renderVariantDropdown("left")}
+                    <span className="text-purple-400">+</span>
+                    {rightCommon ? <ShardDisplay shardId={group.commonShard} fusionData={fusionData} tooltipVisible={false} /> : renderVariantDropdown("right")}
+                    <span className="text-purple-400">=</span>
+                    <ShardDisplay shardId={actualOutput} quantity={activeRecipe.quantity} fusionData={fusionData} />
+                  </div>
+                </div>
+              );
+            }
+
+            const recipe = group.recipes[0];
+
+            let actualOutput = "";
+            if (mode === "output" && selectedOutputShard) {
+              actualOutput = selectedOutputShard.key;
+            } else if (mode === "input") {
+              actualOutput = recipe.output;
+            } else if (recipe.output) {
+              actualOutput = recipe.output;
+            }
+
+            return (
+              <div key={gKey} className={groups.length === 1 ? "" : "px-2"}>
+                <div className="flex items-center gap-2 lg:gap-3 min-w-0 min-h-[40px]">
+                  <ShardDisplay shardId={recipe.input1} fusionData={fusionData} tooltipVisible={false} />
+                  <span className="text-purple-400">+</span>
+                  <ShardDisplay shardId={recipe.input2} fusionData={fusionData} tooltipVisible={false} />
+                  <span className="text-purple-400">=</span>
+                  <ShardDisplay shardId={actualOutput} quantity={recipe.quantity} fusionData={fusionData} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen">
+      <div className="px-2 sm:px-4 py-4">
+        {/* Most profit panel - centered above */}
+        <div className="flex justify-center mb-4 lg:mb-6">
+          <div className="bg-slate-800/40 border border-slate-600/30 rounded-md p-3 lg:p-4 flex flex-col gap-2 w-full lg:max-w-lg">
+            <div className="w-full">
+              <label className="flex items-center gap-2 text-sm font-medium text-amber-300 mb-2">
+                <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
+                Most profit with...
+              </label>
+              <ShardAutocomplete
+                value={profitSearchValue}
+                onChange={setProfitSearchValue}
+                onSelect={handleProfitShardSelect}
+                onFocus={handleProfitSearchInputFocus}
+                placeholder="Search for a shard..."
+                className="w-full"
+                searchMode="name-only"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFilterLowVolume(!filterLowVolume)}
+                className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
+                title={filterLowVolume ? "Filtering low-volume shards" : "Showing all shards"}
+              >
+                <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
+                {filterLowVolume ? "Safe" : "All"}
+              </button>
+              <button
+                onClick={() => setFilterVolatile(!filterVolatile)}
+                className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterVolatile ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
+                title={filterVolatile ? "Filtering volatile price shards" : "Showing all shards"}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
+                {filterVolatile ? "Stable" : "All"}
+              </button>
+              <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+                <button
+                  className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${buyMode === "order" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  onClick={() => setBuyMode("order")}
+                >
+                  Buy Order
+                </button>
+                <button
+                  className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${buyMode === "instant" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  onClick={() => setBuyMode("instant")}
+                >
+                  Instant
+                </button>
+              </div>
+              <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+                <button
+                  className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${sellMode === "order" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  onClick={() => setSellMode("order")}
+                >
+                  Sell Order
+                </button>
+                <button
+                  className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${sellMode === "instant" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  onClick={() => setSellMode("instant")}
+                >
+                  Instant
+                </button>
+              </div>
+            </div>
+            {selectedProfitShard && (
+              <div className="flex items-center justify-center gap-2 lg:gap-3">
+                <div className="flex items-center gap-1 text-sm">
+                  <span className="text-slate-300">Most profit with</span>
+                  <img src={`${import.meta.env.BASE_URL}shardIcons/${selectedProfitShard.key}.png`} alt={selectedProfitShard.name} className="w-5 h-5 object-contain" loading="lazy" />
+                  <span className={`font-semibold ${getRarityColor(selectedProfitShard.rarity)}`}>{selectedProfitShard.name}</span>
+                  <span className="text-slate-400">?</span>
+                </div>
+              </div>
+            )}
+            {profitLoading && (
+              <div className="flex items-center justify-center py-3">
+                <div className="w-5 h-5 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin" />
+              </div>
+            )}
+            {!profitLoading && selectedProfitShard && profitData && (
+              <div className="bg-slate-900/50 border border-slate-700/30 rounded-md p-3">
+                <div className="flex items-center justify-center gap-2 lg:gap-3 mb-3">
+                  {(() => {
+                    const otherShard = fusionData?.shards[profitData.otherInput];
+                    const outputShard = fusionData?.shards[profitData.outputShard];
+                    return (
+                      <>
+                        <div className="flex items-center gap-1">
+                          <img src={`${import.meta.env.BASE_URL}shardIcons/${profitData.otherInput}.png`} alt={otherShard?.name ?? profitData.otherInput} className="w-6 h-6 object-contain" loading="lazy" />
+                          <span className={`text-xs font-medium ${getRarityColor(otherShard?.rarity ?? "common")}`}>{otherShard?.name ?? profitData.otherInput}</span>
+                        </div>
+                        <span className="text-purple-400">+</span>
+                        <div className="flex items-center gap-1">
+                          <img src={`${import.meta.env.BASE_URL}shardIcons/${selectedProfitShard.key}.png`} alt={selectedProfitShard.name} className="w-6 h-6 object-contain" loading="lazy" />
+                          <span className={`text-xs font-medium ${getRarityColor(selectedProfitShard.rarity)}`}>{selectedProfitShard.name}</span>
+                        </div>
+                        <span className="text-purple-400">=</span>
+                        <div className="flex items-center gap-1">
+                          <img src={`${import.meta.env.BASE_URL}shardIcons/${profitData.outputShard}.png`} alt={outputShard?.name ?? profitData.outputShard} className="w-6 h-6 object-contain" loading="lazy" />
+                          <span className={`text-xs font-medium ${getRarityColor(outputShard?.rarity ?? "common")}`}>{outputShard?.name ?? profitData.outputShard}</span>
+                          {profitData.outputQty > 1 && <span className="text-[10px] text-slate-400">×{profitData.outputQty}</span>}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+                <div className="flex items-center gap-4 lg:gap-6 text-xs">
+                  <div className="text-right">
+                    <div className="text-slate-500">Craft</div>
+                    <div className="text-amber-300 font-medium">{formatLargeNumber(profitData.craftCost)}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-slate-500">Sell</div>
+                    <div className="text-slate-300 font-medium">{formatLargeNumber(profitData.sellRevenue)}</div>
+                  </div>
+                  <div className="text-right min-w-[80px]">
+                    <div className="text-slate-500">Profit</div>
+                    <div className={`font-semibold flex items-center gap-1 justify-end ${profitData.profit > 0 ? "text-green-400" : "text-red-400"}`}>
+                      {profitData.profit > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      {formatLargeNumber(profitData.profit)}
+                    </div>
+                  </div>
+                  <div className="text-right min-w-[60px]">
+                    <div className="text-slate-500">Margin</div>
+                    <div className={`font-semibold ${profitData.margin > 0 ? "text-green-400" : "text-red-400"}`}>
+                      {profitData.margin >= 0 ? "+" : ""}{profitData.margin.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {!profitLoading && selectedProfitShard && !profitData && (
+              <div className="text-center py-2 text-xs text-slate-500">
+                No profitable recipe found using this shard.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Input + Output panels - side by side below */}
+        <div className="flex flex-col lg:flex-row justify-center gap-3 lg:gap-6 mb-4 lg:mb-6">
+          {/* Input panel */}
+          <div className="bg-slate-800/40 border border-slate-600/30 rounded-md p-3 lg:p-4 flex flex-col gap-2 w-full lg:max-w-lg">
+            <div className="w-full">
+              <label className="flex items-center gap-2 text-sm font-medium text-green-300 mb-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                Input Shard
+              </label>
+              <ShardAutocomplete
+                value={searchValue}
+                onChange={setSearchValue}
+                onSelect={handleShardSelect}
+                onFocus={handleSearchInputFocus}
+                placeholder="Search for a shard..."
+                className="w-full"
+                searchMode="name-only"
+              />
+            </div>
+            {selectedShard && (
+              <div className="flex items-center justify-center gap-2 lg:gap-3">
+                <div className="flex items-center gap-1 text-sm">
+                  <span className="text-slate-300">What can you make with</span>
+                  <img src={`${import.meta.env.BASE_URL}shardIcons/${selectedShard.key}.png`} alt={selectedShard.name} className="w-5 h-5 object-contain" loading="lazy" />
+                  <span className={`font-semibold ${getRarityColor(selectedShard.rarity)}`}>{selectedShard.name}</span>
+                  <span className="text-slate-400">?</span>
+                </div>
+              </div>
+            )}
+            {!loading && mode === "input" && recipes.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 lg:gap-4">
+                <RecipeCountBadge count={totalGroupBlocks} label="Recipe Groups" variant="green" />
+                <SearchFilterInput value={filterValue} onChange={setFilterValue} placeholder="Filter recipes..." variant="green" />
+              </div>
+            )}
+          </div>
+
+          {/* Output panel */}
+          <div className="bg-slate-800/40 border border-slate-600/30 rounded-md p-3 lg:p-4 flex flex-col gap-2 w-full lg:max-w-lg">
+            <div className="w-full">
+              <label className="flex items-center gap-2 text-sm font-medium text-fuchsia-300 mb-2">
+                <div className="w-2 h-2 bg-fuchsia-500 rounded-full"></div>
+                Output Shard
+              </label>
+              <ShardAutocomplete
+                value={outputSearchValue}
+                onChange={setOutputSearchValue}
+                onSelect={handleOutputShardSelect}
+                onFocus={handleOutputSearchInputFocus}
+                placeholder="Search for a shard..."
+                className="w-full"
+                searchMode="name-only"
+              />
+            </div>
+            {selectedOutputShard && (
+              <div className="flex items-center justify-center gap-2 lg:gap-3">
+                <div className="flex items-center gap-1 text-sm">
+                  <span className="text-slate-300">How to make</span>
+                  <img src={`${import.meta.env.BASE_URL}shardIcons/${selectedOutputShard.key}.png`} alt={selectedOutputShard.name} className="w-5 h-5 object-contain" loading="lazy" />
+                  <span className={`font-semibold ${getRarityColor(selectedOutputShard.rarity)}`}>{selectedOutputShard.name}</span>
+                  <span className="text-slate-400">?</span>
+                </div>
+              </div>
+            )}
+            {!loading && mode === "output" && recipes.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 lg:gap-4">
+                <RecipeCountBadge count={totalGroupBlocks} label="Recipe Groups" variant="fuchsia" />
+                <SearchFilterInput value={filterValue} onChange={setFilterValue} placeholder="Filter recipes..." variant="fuchsia" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Results section */}
+        {mode && recipes.length > 0 ? (
+          <div className="flex justify-center">
+            <div className="w-full max-w-fit mx-auto space-y-8">
+              {renderCategory(filteredCategories.special, "special", "Special Fusions", "Produces 2 shards", "text-yellow-400")}
+              {renderCategory(filteredCategories.id, "id", "ID Fusions", "Produces 1 shard", "text-blue-400")}
+              {renderCategory(filteredCategories.chameleon, "chameleon", "Chameleon Fusions", "Produces 1 shard", "text-green-400")}
+            </div>
+          </div>
+        ) : mode && recipes.length === 0 ? (
+          <div className="text-center py-12 lg:py-16">
+            <div className="text-slate-400 text-base lg:text-lg">{mode === "input" ? "No fusion recipes found using this shard." : "No recipes found to create this shard."}</div>
+            <div className="text-slate-500 text-xs lg:text-sm mt-2">
+              {mode === "input" ? "This shard might not be used in any fusion recipes." : "This shard might be obtained directly or not fuseable."}
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-12 lg:py-20">
+            <div className="text-slate-400 text-lg lg:text-xl">Select an input shard or output shard to see recipes</div>
+            <div className="text-slate-500 text-xs lg:text-sm mt-2 lg:mt-3 px-4">Choose a shard on the left to see what you can make, or on the right to see how to make it.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default RecipePage;
