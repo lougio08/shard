@@ -1,5 +1,4 @@
 import type { ShardWithKey, Shard } from "../types/types";
-import type { SkyCoflBazaarSnapshot } from "../types/skyCoflApiTypes";
 import { sortShardsByNameWithPrefixAwareness, filterShards, BASIC_FILTER_CONFIG, NAME_ONLY_FILTER_CONFIG } from "../utilities";
 
 interface FusionData {
@@ -7,8 +6,10 @@ interface FusionData {
   recipes: Record<string, Record<string, string[][]>>;
 }
 
-const MAX_RETRIES = 3;
-const RETRY_DELAYS = [500, 1000, 2000];
+interface BazaarCache {
+  data: Record<string, number>;
+  timestamp: number;
+}
 
 export class DataService {
   private static instance: DataService;
@@ -16,6 +17,8 @@ export class DataService {
   private shardNameToKeyCache: Record<string, string> | null = null;
   private defaultRatesCache: Record<string, number> | null = null;
   private fusionDataCache: FusionData | null = null;
+  private bazaarPriceCache: BazaarCache | null = null;
+  private readonly BAZAAR_CACHE_TTL = 120_000;
 
   public static getInstance(): DataService {
     if (!DataService.instance) {
@@ -36,52 +39,37 @@ export class DataService {
     }
   }
 
-  async fetchSkyCoflSnapshot(itemTag: string): Promise<SkyCoflBazaarSnapshot | null> {
+  async loadShardCosts(useInstantBuyPrices: boolean): Promise<Record<string, number>> {
+    const now = Date.now();
+    if (this.bazaarPriceCache && now - this.bazaarPriceCache.timestamp < this.BAZAAR_CACHE_TTL) {
+      return this.bazaarPriceCache.data;
+    }
+
     try {
-      const response = await fetch(`https://sky.coflnet.com/api/bazaar/${itemTag}/snapshot`);
-      if (!response.ok) return null;
-      return await response.json();
-    } catch {
-      return null;
-    }
-  }
-
-  async fetchSkyCoflBazaarPrices(shards: ShardWithKey[]): Promise<Record<string, SkyCoflBazaarSnapshot>> {
-    const SKYCOFL_BASE = "https://sky.coflnet.com/api/bazaar";
-    const BATCH_SIZE = 25;
-    const DELAY_MS = 1200;
-    const results: Record<string, SkyCoflBazaarSnapshot> = {};
-
-    for (let i = 0; i < shards.length; i += BATCH_SIZE) {
-      const batch = shards.slice(i, i + BATCH_SIZE);
-      const promises = batch.map(async (shard) => {
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-          try {
-            const resp = await fetch(`${SKYCOFL_BASE}/${shard.internal_id}/snapshot`);
-            if (!resp.ok) {
-              if (attempt < MAX_RETRIES - 1) {
-                await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
-                continue;
-              }
-              return;
-            }
-            const data: SkyCoflBazaarSnapshot = await resp.json();
-            results[shard.id] = data;
-            return;
-          } catch {
-            if (attempt < MAX_RETRIES - 1) {
-              await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
-            }
-          }
-        }
-      });
-      await Promise.all(promises);
-      if (i + BATCH_SIZE < shards.length) {
-        await new Promise((r) => setTimeout(r, DELAY_MS));
+      const response = await fetch("https://api.hypixel.net/v2/skyblock/bazaar");
+      if (!response.ok) {
+        throw new Error(`Hypixel API error: ${response.status}`);
       }
-    }
+      const json = await response.json();
+      const products: Record<string, { quick_status: { buyPrice: number; sellPrice: number } }> = json.products || {};
 
-    return results;
+      const shards = await this.loadShards();
+      const costs: Record<string, number> = {};
+      for (const shard of shards) {
+        const product = products[shard.internal_id];
+        if (product?.quick_status) {
+          costs[shard.id] = useInstantBuyPrices ? product.quick_status.buyPrice : product.quick_status.sellPrice;
+        }
+      }
+
+      this.bazaarPriceCache = { data: costs, timestamp: now };
+      return costs;
+    } catch (error) {
+      if (this.bazaarPriceCache) {
+        return this.bazaarPriceCache.data;
+      }
+      return {};
+    }
   }
 
   async loadShards(): Promise<ShardWithKey[]> {
@@ -131,21 +119,6 @@ export class DataService {
 
     this.defaultRatesCache = await this.fetchJson<Record<string, number>>("rates.json");
     return this.defaultRatesCache;
-  }
-
-  async loadShardCosts(useInstantBuyPrices: boolean): Promise<Record<string, number>> {
-    const shards = await this.loadShards();
-    const skyCoflPrices = await this.fetchSkyCoflBazaarPrices(shards);
-    const costs: Record<string, number> = {};
-
-    for (const shard of shards) {
-      const snapshot = skyCoflPrices[shard.id];
-      if (snapshot) {
-        costs[shard.id] = useInstantBuyPrices ? snapshot.buyPrice : snapshot.sellPrice;
-      }
-    }
-
-    return costs;
   }
 
   private sortShardsByQuery(shards: ShardWithKey[], query: string): ShardWithKey[] {

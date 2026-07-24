@@ -3,7 +3,7 @@ import { Menu, X, ChevronDown, ChevronRight, Package } from "lucide-react";
 import { CalculatorForm, CalculationResults, InventoryCalculationResults } from "../components";
 import { WelcomeProfileModal, InventoryManagementModal } from "../components";
 import { useCustomRates, useCalculatorState } from "../hooks";
-import { DataService, CalculationService } from "../services";
+import { DataService } from "../services";
 import type { CalculationFormData } from "../schemas";
 import type { CalculationResult, CalculationParams, RecipeOverride, Data, InventoryCalculationResult } from "../types/types";
 import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards } from "../utilities";
@@ -125,7 +125,7 @@ const performCalculation = async (
     );
 
     promise
-      .then(async results => {
+      .then(({ results, parsedData }) => {
         if (checkCancelled()) return;
 
         const combinedMaterials: Record<string, number> = {};
@@ -165,11 +165,8 @@ const performCalculation = async (
 
         callbacks.setResult(combinedResult);
 
-        // parseData is already cached from calculateMultipleShardsParallel, just reuse it
-        const service = CalculationService.getInstance();
-        const data = await service.parseData(params);
-        if (!checkCancelled() && data) {
-          callbacks.setCalculationData(data);
+        if (!checkCancelled() && parsedData) {
+          callbacks.setCalculationData(parsedData);
           callbacks.setTargetShardName(`${selectedShardKeys.length} Shards`);
           callbacks.setCurrentShardKey(selectedShardKeys[0] || "");
           callbacks.setCurrentQuantity(selectedShardKeys.length);

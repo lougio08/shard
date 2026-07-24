@@ -7,7 +7,6 @@ interface StartMsg {
   requiredQuantity: number;
   params: CalculationParams;
   recipeOverrides: RecipeOverride[];
-  parsedData: Data;
 }
 
 interface BatchStartWithDataMsg {
@@ -15,9 +14,6 @@ interface BatchStartWithDataMsg {
   targets: Array<{ shard: string; quantity: number }>;
   params: CalculationParams;
   recipeOverrides: RecipeOverride[];
-  parsedData: Data;
-  choices: Record<string, RecipeChoice>;
-  cycleNodes: string[][];
 }
 
 interface InventoryCalculationMsg {
@@ -28,7 +24,6 @@ interface InventoryCalculationMsg {
   recipeOverrides: RecipeOverride[];
   inventory: Record<string, number>;
   ownedAttributes: Record<string, number>;
-  parsedData: Data;
 }
 
 type ProgressPhase = "parsing" | "computing" | "building" | "assigning" | "finalizing";
@@ -48,6 +43,7 @@ interface BatchResultMsg {
   type: "batch-result";
   results: CalculationResult[];
   materialBreakdown?: Map<string, Map<string, number>>;
+  parsedData?: Data;
 }
 interface InventoryResultMsg {
   type: "inventory-result";
@@ -88,10 +84,11 @@ self.onmessage = async (e: MessageEvent<StartMsg | BatchStartWithDataMsg | Inven
 };
 
 async function handleSingleCalculation(data: StartMsg) {
-  const { targetShard, requiredQuantity, params, recipeOverrides, parsedData } = data;
+  const { targetShard, requiredQuantity, params, recipeOverrides } = data;
 
   try {
     const service = CalculationService.getInstance();
+    const parsedData = await service.parseData(params);
 
     if (!parsedData.shards[targetShard]) {
       const emptyResult: CalculationResult = {
@@ -103,7 +100,7 @@ async function handleSingleCalculation(data: StartMsg) {
         craftTime: 0,
         tree: { shard: targetShard, method: "direct", quantity: 0 },
       };
-      post({ type: "result", result: emptyResult });
+      post({ type: "result", result: emptyResult, parsedData });
       return;
     }
 
@@ -147,7 +144,7 @@ async function handleSingleCalculation(data: StartMsg) {
     };
 
     post({ type: "progress", phase: "finalizing", progress: 1, message: "Done" });
-    post({ type: "result", result });
+    post({ type: "result", result, parsedData });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Calculation failed";
     post({ type: "error", message });
@@ -155,15 +152,16 @@ async function handleSingleCalculation(data: StartMsg) {
 }
 
 async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
-  const { targets, params, recipeOverrides, parsedData, choices: choicesObj, cycleNodes } = data;
+  const { targets, params, recipeOverrides } = data;
 
   try {
     const service = CalculationService.getInstance();
+    const parsedData = await service.parseData(params);
 
-    const choices = new Map<string, RecipeChoice>();
-    Object.entries(choicesObj).forEach(([key, value]) => {
-      choices.set(key, value);
-    });
+    const { choices: choicesMap } = service.computeMinCosts(parsedData, params, recipeOverrides);
+    const choices = new Map(choicesMap);
+
+    const cycleNodes = params.crocodileLevel > 0 || recipeOverrides.length > 0 ? service.findCycleNodes(choices) : [];
 
     const results: CalculationResult[] = [];
     const { crocodileMultiplier } = service.calculateMultipliers(params);
@@ -235,7 +233,7 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
     }
 
     post({ type: "progress", phase: "finalizing", progress: 1, message: "Done" });
-    post({ type: "batch-result", results, materialBreakdown });
+    post({ type: "batch-result", results, materialBreakdown, parsedData });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Batch calculation failed";
     post({ type: "error", message });
@@ -243,10 +241,12 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
 }
 
 async function handleInventoryCalculation(data: InventoryCalculationMsg) {
-  const { targetShard, requiredQuantity, params, recipeOverrides, inventory, ownedAttributes, parsedData } = data;
+  const { targetShard, requiredQuantity, params, recipeOverrides, inventory, ownedAttributes } = data;
 
   try {
+    const service = CalculationService.getInstance();
     const invService = InvCalculationService.getInstance();
+    const parsedData = await service.parseData(params);
     const inventoryMap = new Map(Object.entries(inventory));
     const ownedAttributesMap = new Map(Object.entries(ownedAttributes));
 
@@ -260,7 +260,7 @@ async function handleInventoryCalculation(data: InventoryCalculationMsg) {
         craftTime: 0,
         tree: { shard: targetShard, method: "direct", quantity: 0 },
       };
-      post({ type: "inventory-result", result: emptyResult });
+      post({ type: "inventory-result", result: emptyResult, parsedData });
       return;
     }
 
@@ -275,7 +275,7 @@ async function handleInventoryCalculation(data: InventoryCalculationMsg) {
     );
 
     post({ type: "progress", phase: "finalizing", progress: 1, message: "Done" });
-    post({ type: "inventory-result", result });
+    post({ type: "inventory-result", result, parsedData });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Inventory calculation failed";
     post({ type: "error", message });
