@@ -1,7 +1,7 @@
 import React from "react";
 import { Clock, Coins, Hammer, Target, BarChart3, TicketPercent } from "lucide-react";
 import { formatLargeNumber, formatNumber, formatTime } from "../../utilities";
-import type { InventoryCalculationResult, Data, CalculationParams, RecipeOverride } from "../../types/types";
+import type { InventoryCalculationResult, Data, CalculationParams, RecipeOverride, PriceInfo } from "../../types/types";
 import { InventoryRecipeTreeNode } from "../tree";
 import { SummaryCard, MaterialItem } from "../ui";
 import { RecipeOverrideManager } from "../forms";
@@ -24,6 +24,10 @@ interface InventoryCalculationResultsProps {
   inventory: Map<string, number>;
   disabledShards: Set<string>;
   onDisabledShardsChange: (disabled: Set<string>) => void;
+  bazaarPrices?: Record<string, PriceInfo> | null;
+  filterLowVolume?: boolean;
+  filterVolatile?: boolean;
+  suspiciousPriceShards?: Set<string>;
 }
 
 export const InventoryCalculationResults: React.FC<InventoryCalculationResultsProps> = ({
@@ -43,6 +47,10 @@ export const InventoryCalculationResults: React.FC<InventoryCalculationResultsPr
   inventory,
   disabledShards,
   onDisabledShardsChange,
+  bazaarPrices,
+  filterLowVolume,
+  filterVolatile,
+  suspiciousPriceShards,
 }) => {
   const targetShardData = data.shards[targetShard];
   const targetShardRate = targetShardData?.rate ?? 0;
@@ -214,6 +222,10 @@ export const InventoryCalculationResults: React.FC<InventoryCalculationResultsPr
                       onShowAlternatives={showAlternatives}
                       ironManView={ironManView}
                       remainingInventory={result.remainingInventory}
+                      bazaarPrices={bazaarPrices ?? undefined}
+                      filterLowVolume={filterLowVolume}
+                      filterVolatile={filterVolatile}
+                      suspiciousPriceShards={suspiciousPriceShards}
                     />
                   </>
                 )}

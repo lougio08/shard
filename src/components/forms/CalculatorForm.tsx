@@ -1,5 +1,5 @@
 import React from "react";
-import { Zap, RotateCcw, Settings, TriangleAlert, Layers } from "lucide-react";
+import { Zap, RotateCcw, Settings, TriangleAlert, Layers, ShieldCheck, AlertTriangle } from "lucide-react";
 import { type CalculationFormData } from "../../schemas";
 import { ShardAutocomplete, MoneyInput } from "./inputs";
 import { useCalculatorState, useShards } from "../../hooks";
@@ -17,6 +17,10 @@ interface CalculatorFormProps {
   ownedAttributes?: Map<string, number>;
   useInventory?: boolean;
   onUseInventoryChange?: (enabled: boolean) => void;
+  filterLowVolume?: boolean;
+  onFilterLowVolumeChange?: (v: boolean) => void;
+  filterVolatile?: boolean;
+  onFilterVolatileChange?: (v: boolean) => void;
 }
 
 type LevelKey = keyof Pick<
@@ -24,7 +28,7 @@ type LevelKey = keyof Pick<
   "newtLevel" | "salamanderLevel" | "lizardKingLevel" | "leviathanLevel" | "pythonLevel" | "kingCobraLevel" | "seaSerpentLevel" | "tiamatLevel" | "crocodileLevel"
 >;
 
-export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedAttributes, useInventory, onUseInventoryChange }) => {
+export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedAttributes, useInventory, onUseInventoryChange, filterLowVolume, onFilterLowVolumeChange, filterVolatile, onFilterVolatileChange }) => {
   const { form, setForm, saveEnabled, setSaveEnabledState } = useCalculatorState();
   const { shards } = useShards();
 
@@ -587,6 +591,32 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
               {/* Instant Buy Prices Switch */}
               {!form.ironManView && (
                 <ToggleSwitch id="instantBuyPrices" label="Use Instant Buy Prices" checked={form.instantBuyPrices} onChange={(checked) => handleInputChange("instantBuyPrices", checked)} />
+              )}
+              {onFilterLowVolumeChange !== undefined && onFilterVolatileChange !== undefined && (
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => onFilterLowVolumeChange(!filterLowVolume)}
+                    className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${
+                      filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
+                    }`}
+                    title={filterLowVolume ? "Filtering low-volume shards" : "Showing all shards"}
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
+                    {filterLowVolume ? "Stable" : "All"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onFilterVolatileChange(!filterVolatile)}
+                    className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${
+                      filterVolatile ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
+                    }`}
+                    title={filterVolatile ? "Filtering volatile price shards" : "Showing all shards"}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
+                    {filterVolatile ? "Safe" : "All"}
+                  </button>
+                </div>
               )}
             </div>
           </div>

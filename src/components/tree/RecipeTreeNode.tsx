@@ -1,11 +1,14 @@
 import React from "react";
 import { getRarityColor, formatShardDescription, formatLargeNumber } from "../../utilities";
 import { GeckoIcon } from "../ui/GeckoIcon";
-import { ChevronDown, ChevronRight, MoveRight, Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, MoveRight, Settings, AlertTriangle, ShieldX } from "lucide-react";
 import { formatNumber } from "../../utilities";
-import type { RecipeTreeNodeProps, Recipe, Shard, RecipeTree } from "../../types/types";
+import type { RecipeTreeNodeProps, Recipe, Shard, RecipeTree, PriceInfo } from "../../types/types";
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
+
+const MIN_BUY_VOLUME = 3000;
+const MIN_SELL_VOLUME = 1000;
 
 export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   tree,
@@ -19,6 +22,9 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   noWoodenBait = false,
   ironManView,
   bazaarPrices,
+  filterLowVolume,
+  filterVolatile,
+  suspiciousPriceShards,
 }) => {
   const shard = data.shards[tree.shard];
 
@@ -65,6 +71,21 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
     return null;
   };
 
+  const isShardFiltered = (shardId: string): { filtered: boolean; reason: string } => {
+    if (!bazaarPrices || ironManView) return { filtered: false, reason: "" };
+    const priceInfo = bazaarPrices[shardId];
+    if (filterVolatile && suspiciousPriceShards?.has(shardId)) {
+      return { filtered: true, reason: "suspicious" };
+    }
+    if (filterLowVolume) {
+      if (!priceInfo) return { filtered: true, reason: "no price" };
+      if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME || priceInfo.dailySellVolume < MIN_SELL_VOLUME) {
+        return { filtered: true, reason: "volume" };
+      }
+    }
+    return { filtered: false, reason: "" };
+  };
+
   const renderChevron = (isExpanded: boolean) => (isExpanded ? <ChevronDown className="w-4 h-4 text-amber-400" /> : <ChevronRight className="w-4 h-4 text-amber-400" />);
 
   const renderShardInfo = (quantity: number, shard: Shard, showRate = true) => {
@@ -86,6 +107,11 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
           <div className="flex items-center gap-2">
             <img src={`${import.meta.env.BASE_URL}shardIcons/${shard.id}.png`} alt={shard.name} className="w-5 h-5 object-contain flex-shrink-0" loading="lazy" />
             <span className={getRarityColor(shard.rarity)}>{shard.name}</span>
+            {!ironManView && bazaarPrices?.[shard.id] && (
+              (bazaarPrices[shard.id].dailyBuyVolume < 3000 || bazaarPrices[shard.id].dailySellVolume < 1000) && (
+                <span title="Low bazaar volume"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></span>
+              )
+            )}
           </div>
         </Tooltip>
         {showRate && (
@@ -191,35 +217,45 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
     );
   };
 
-  const renderDirectShard = (quantity: number, shard: Shard) => (
-    <div className="rounded border border-slate-400/50 flex items-center justify-between px-3 py-1.5 text-sm font-medium gap-2">
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="w-2 h-2 bg-green-400 rounded-full" />
-        {renderShardInfo(Math.ceil(quantity), shard, false)}
-        <span className="px-1 py-0.4 text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-md flex-shrink-0">{ironManView ? "Direct" : "Bazaar"}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="text-right min-w-[80px] ml-2">
-          {ironManView && (
-            <>
-              <span className="text-slate-300 text-xs font-medium">{formatNumber(shard.rate)}</span>
-              <span className="text-slate-500 text-xs mx-0.5">/</span>
-              <span className="text-slate-400 text-xs">hr</span>
-            </>
-          )}
-          {!ironManView && (
-            <>
-              <span className="text-slate-300 text-xs font-medium">
-                {bazaarPrices?.[shard.id]?.dailyBuyVolume
-                  ? formatLargeNumber(bazaarPrices[shard.id].dailyBuyVolume / 24)
-                  : formatLargeNumber(quantity * shard.rate)}
-              </span>
-            </>
+  const renderDirectShard = (quantity: number, shard: Shard) => {
+    const { filtered, reason } = isShardFiltered(shard.id);
+    const isFiltered = filtered && !ironManView;
+    return (
+      <div className={`rounded border flex items-center justify-between px-3 py-1.5 text-sm font-medium gap-2 ${isFiltered ? "border-red-700/50 opacity-60" : "border-slate-400/50"}`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className={`w-2 h-2 rounded-full ${isFiltered ? "bg-red-400" : "bg-green-400"}`} />
+          {isFiltered && <ShieldX className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
+          {renderShardInfo(Math.ceil(quantity), shard, false)}
+          <span className={`px-1 py-0.4 text-xs border rounded-md flex-shrink-0 ${isFiltered ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-green-500/20 text-green-400 border-green-500/30"}`}>{ironManView ? "Direct" : "Bazaar"}</span>
+          {isFiltered && (
+            <span className="text-[10px] text-red-400 whitespace-nowrap">
+              {reason === "no price" ? "No price" : reason === "suspicious" ? "Suspicious price" : "Low volume"}
+            </span>
           )}
         </div>
+        <div className="flex items-center gap-2">
+          <div className="text-right min-w-[80px] ml-2">
+            {ironManView && (
+              <>
+                <span className="text-slate-300 text-xs font-medium">{formatNumber(shard.rate)}</span>
+                <span className="text-slate-500 text-xs mx-0.5">/</span>
+                <span className="text-slate-400 text-xs">hr</span>
+              </>
+            )}
+            {!ironManView && (
+              <>
+                <span className="text-slate-300 text-xs font-medium">
+                  {bazaarPrices?.[shard.id]?.dailyBuyVolume
+                    ? formatLargeNumber(bazaarPrices[shard.id].dailyBuyVolume / 24)
+                    : formatLargeNumber(quantity * shard.rate)}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderSubRecipe = (recipeTree: RecipeTree, inputShard: Shard, nodePrefix: string) => {
     if (recipeTree.method === "direct") return renderDirectShard(recipeTree.quantity, inputShard);
@@ -451,12 +487,20 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   }
 
   if (tree.method === "direct") {
+    const { filtered: isDirectFiltered, reason: directReason } = isShardFiltered(tree.shard);
+    const showDirectFiltered = isDirectFiltered && !ironManView;
     return (
-      <div className="flex items-center justify-between pl-3.5 pr-1 py-1 bg-slate-800 rounded-md border border-slate-600">
+      <div className={`flex items-center justify-between pl-3.5 pr-1 py-1 bg-slate-800 rounded-md border ${showDirectFiltered ? "border-red-700/50 opacity-60" : "border-slate-600"}`}>
         <div className="flex items-center space-x-2 p-0.5 text-sm">
-          <div className="w-2 h-2 bg-green-400 rounded-full mr-2.5" />
+          <div className={`w-2 h-2 rounded-full mr-2.5 ${showDirectFiltered ? "bg-red-400" : "bg-green-400"}`} />
+          {showDirectFiltered && <ShieldX className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
           {renderShardInfo(tree.quantity, shard, false)}
-          <span className="px-1 py-0.4 text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-md flex-shrink-0">{ironManView ? "Direct" : "Bazaar"}</span>
+          <span className={`px-1 py-0.4 text-xs border rounded-md flex-shrink-0 ${showDirectFiltered ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-green-500/20 text-green-400 border-green-500/30"}`}>{ironManView ? "Direct" : "Bazaar"}</span>
+          {showDirectFiltered && (
+            <span className="text-[10px] text-red-400 whitespace-nowrap">
+              {directReason === "no price" ? "No price" : directReason === "suspicious" ? "Suspicious price" : "Low volume"}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="text-right">
@@ -663,6 +707,9 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
             noWoodenBait={noWoodenBait}
             ironManView={ironManView}
             bazaarPrices={bazaarPrices}
+            filterLowVolume={filterLowVolume}
+            filterVolatile={filterVolatile}
+            suspiciousPriceShards={suspiciousPriceShards}
           />
           <RecipeTreeNode
             tree={input2}
@@ -674,6 +721,9 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
             noWoodenBait={noWoodenBait}
             ironManView={ironManView}
             bazaarPrices={bazaarPrices}
+            filterLowVolume={filterLowVolume}
+            filterVolatile={filterVolatile}
+            suspiciousPriceShards={suspiciousPriceShards}
           />
         </div>
       )}

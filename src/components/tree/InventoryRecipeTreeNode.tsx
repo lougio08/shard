@@ -1,11 +1,14 @@
 import React from "react";
 import { getRarityColor, formatShardDescription, formatLargeNumber } from "../../utilities";
 import { GeckoIcon } from "../ui/GeckoIcon";
-import { ChevronDown, ChevronRight, Settings, Package, MoveRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings, Package, MoveRight, ShieldX } from "lucide-react";
 import { formatNumber } from "../../utilities";
-import type { InventoryRecipeTreeNodeProps, Recipe, Shard, InventoryRecipeTree } from "../../types/types";
+import type { InventoryRecipeTreeNodeProps, Recipe, Shard, InventoryRecipeTree, PriceInfo } from "../../types/types";
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
+
+const MIN_BUY_VOLUME = 3000;
+const MIN_SELL_VOLUME = 1000;
 
 export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = ({
   tree,
@@ -20,6 +23,10 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
   ironManView,
   isInCycle = false,
   remainingInventory,
+  bazaarPrices,
+  filterLowVolume,
+  filterVolatile,
+  suspiciousPriceShards,
 }) => {
   // Helper function to get expansion state
   const pendingDefaults = React.useRef<Map<string, boolean>>(new Map());
@@ -63,6 +70,10 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
             ironManView={ironManView}
             isInCycle={isInCycle}
             remainingInventory={remainingInventory}
+            bazaarPrices={bazaarPrices}
+            filterLowVolume={filterLowVolume}
+            filterVolatile={filterVolatile}
+            suspiciousPriceShards={suspiciousPriceShards}
           />
         ))}
       </>
@@ -106,6 +117,21 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
       }
     }
     return null;
+  };
+
+  const isShardFiltered = (shardId: string): { filtered: boolean; reason: string } => {
+    if (!bazaarPrices || ironManView) return { filtered: false, reason: "" };
+    const priceInfo = bazaarPrices[shardId];
+    if (filterVolatile && suspiciousPriceShards?.has(shardId)) {
+      return { filtered: true, reason: "suspicious" };
+    }
+    if (filterLowVolume) {
+      if (!priceInfo) return { filtered: true, reason: "no price" };
+      if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME || priceInfo.dailySellVolume < MIN_SELL_VOLUME) {
+        return { filtered: true, reason: "volume" };
+      }
+    }
+    return { filtered: false, reason: "" };
   };
 
   const renderChevron = (isExpanded: boolean) => (isExpanded ? <ChevronDown className="w-4 h-4 text-amber-400" /> : <ChevronRight className="w-4 h-4 text-amber-400" />);
@@ -190,12 +216,20 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
   };
 
   const renderDirectShard = (quantity: number, shard: Shard, inCycle = false) => {
+    const { filtered, reason } = isShardFiltered(shard.id);
+    const isFiltered = filtered && !ironManView;
     return (
-      <div className={`flex items-center justify-between pl-3.5 pr-1 py-1 ${inCycle ? 'bg-slate-900' : 'bg-slate-800'} rounded-md border border-slate-600`}>
+      <div className={`flex items-center justify-between pl-3.5 pr-1 py-1 ${inCycle ? 'bg-slate-900' : 'bg-slate-800'} rounded-md border ${isFiltered ? "border-red-700/50 opacity-60" : "border-slate-600"}`}>
         <div className="flex items-center space-x-2 p-0.5 text-sm">
-          <div className="w-2 h-2 bg-green-400 rounded-full mr-2.5" />
+          <div className={`w-2 h-2 rounded-full mr-2.5 ${isFiltered ? "bg-red-400" : "bg-green-400"}`} />
+          {isFiltered && <ShieldX className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
           {renderShardInfo(quantity, shard, false)}
-          <span className="px-1 py-0.4 text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-md flex-shrink-0">{ironManView ? "Direct" : "Bazaar"}</span>
+          <span className={`px-1 py-0.4 text-xs border rounded-md flex-shrink-0 ${isFiltered ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-green-500/20 text-green-400 border-green-500/30"}`}>{ironManView ? "Direct" : "Bazaar"}</span>
+          {isFiltered && (
+            <span className="text-[10px] text-red-400 whitespace-nowrap">
+              {reason === "no price" ? "No price" : reason === "suspicious" ? "Suspicious price" : "Low volume"}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="text-right">
@@ -294,6 +328,10 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               ironManView={ironManView}
               isInCycle={inCycle}
               remainingInventory={remainingInventory}
+              bazaarPrices={bazaarPrices}
+              filterLowVolume={filterLowVolume}
+              filterVolatile={filterVolatile}
+              suspiciousPriceShards={suspiciousPriceShards}
             />
             <InventoryRecipeTreeNode
               tree={recipeTree.inputs[1]}
@@ -306,6 +344,10 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               ironManView={ironManView}
               isInCycle={inCycle}
               remainingInventory={remainingInventory}
+              bazaarPrices={bazaarPrices}
+              filterLowVolume={filterLowVolume}
+              filterVolatile={filterVolatile}
+              suspiciousPriceShards={suspiciousPriceShards}
             />
           </div>
         )}
@@ -601,6 +643,10 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               ironManView={ironManView}
               isInCycle={isInCycle}
               remainingInventory={remainingInventory}
+              bazaarPrices={bazaarPrices}
+              filterLowVolume={filterLowVolume}
+              filterVolatile={filterVolatile}
+              suspiciousPriceShards={suspiciousPriceShards}
             />
             <InventoryRecipeTreeNode
               tree={input2}
@@ -613,6 +659,10 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               ironManView={ironManView}
               isInCycle={isInCycle}
               remainingInventory={remainingInventory}
+              bazaarPrices={bazaarPrices}
+              filterLowVolume={filterLowVolume}
+              filterVolatile={filterVolatile}
+              suspiciousPriceShards={suspiciousPriceShards}
             />
           </div>
         )}

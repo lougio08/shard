@@ -97,4 +97,37 @@ export function detectVolatileShards(
   return volatileShardIds;
 }
 
+export function detectSuspiciousOrderBookPrices(
+  orderBooks: Record<string, { sellSummary: { amount: number; pricePerUnit: number; orders: number }[]; buySummary: { amount: number; pricePerUnit: number; orders: number }[] }>
+): Set<string> {
+  const suspicious = new Set<string>();
+  for (const [shardId, book] of Object.entries(orderBooks)) {
+    if (book.sellSummary.length >= 2) {
+      const best = book.sellSummary[0];
+      const next = book.sellSummary[1];
+      if (next.pricePerUnit / best.pricePerUnit > 3) {
+        suspicious.add(shardId);
+        continue;
+      }
+    }
+    if (book.buySummary.length >= 2) {
+      const best = book.buySummary[0];
+      const next = book.buySummary[1];
+      if (best.pricePerUnit / next.pricePerUnit > 3) {
+        suspicious.add(shardId);
+        continue;
+      }
+    }
+    if (book.sellSummary.length > 0 && book.buySummary.length > 0) {
+      const sellPrice = book.sellSummary[0].pricePerUnit;
+      const buyPrice = book.buySummary[0].pricePerUnit;
+      const mid = (sellPrice + buyPrice) / 2;
+      if (mid > 0 && (sellPrice - buyPrice) / mid > 0.5) {
+        suspicious.add(shardId);
+      }
+    }
+  }
+  return suspicious;
+}
+
 export { PRICE_SWING_THRESHOLD };

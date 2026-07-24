@@ -9,6 +9,8 @@ import pako from "pako";
 import { CopyTreeModal } from "../modals";
 
 const MIN_SHARD_VOLUME = 5000;
+const MIN_BUY_VOLUME = 3000;
+const MIN_SELL_VOLUME = 1000;
 
 // Utility function to manage expanded states
 const useTreeExpansion = (tree: RecipeTree | null) => {
@@ -76,6 +78,10 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
   onResetRecipeOverrides,
   ironManView,
   materialsOnly = false,
+  filterLowVolume = true,
+  filterVolatile = true,
+  bazaarPrices = null,
+  suspiciousPriceShards,
 }) => {
   const { expandedStates, handleExpandAll, handleCollapseAll, handleNodeToggle } = useTreeExpansion(result.tree);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
@@ -429,6 +435,19 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
           {Array.from(result.totalQuantities)
             .sort(([, quantityA], [, quantityB]) => quantityB - quantityA)
+            .filter(([shardId]) => {
+              if (ironManView || !bazaarPrices) return true;
+              const priceInfo = bazaarPrices[shardId];
+              if (filterVolatile && suspiciousPriceShards?.has(shardId)) {
+                return false;
+              }
+              if (filterLowVolume) {
+                if (!priceInfo) return false;
+                const volumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+                if (!volumeOk) return false;
+              }
+              return true;
+            })
             .map(([shardId, quantity]) => {
               const shard = data.shards[shardId];
               const breakdown = result.materialBreakdown?.get(shardId);
@@ -509,6 +528,10 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
                     onShowAlternatives={showAlternatives}
                     noWoodenBait={params.noWoodenBait}
                     ironManView={ironManView}
+                    bazaarPrices={bazaarPrices ?? undefined}
+                    filterLowVolume={filterLowVolume}
+                    filterVolatile={filterVolatile}
+                    suspiciousPriceShards={suspiciousPriceShards}
                   />
                   )}
                 </>

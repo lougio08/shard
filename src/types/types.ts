@@ -138,6 +138,10 @@ export interface CalculationResultsProps {
   onResetRecipeOverrides: () => void;
   ironManView: boolean;
   materialsOnly?: boolean;
+  filterLowVolume?: boolean;
+  filterVolatile?: boolean;
+  bazaarPrices?: Record<string, PriceInfo> | null;
+  suspiciousPriceShards?: Set<string>;
 }
 
 export interface PriceInfo {
@@ -162,6 +166,9 @@ export interface RecipeTreeNodeProps {
   noWoodenBait?: boolean;
   ironManView: boolean;
   bazaarPrices?: Record<string, PriceInfo>;
+  filterLowVolume?: boolean;
+  filterVolatile?: boolean;
+  suspiciousPriceShards?: Set<string>;
 }
 
 export interface InventoryRecipeTreeNodeProps {
@@ -177,6 +184,10 @@ export interface InventoryRecipeTreeNodeProps {
   ironManView: boolean;
   isInCycle?: boolean;
   remainingInventory?: Map<string, number>;
+  bazaarPrices?: Record<string, PriceInfo>;
+  filterLowVolume?: boolean;
+  filterVolatile?: boolean;
+  suspiciousPriceShards?: Set<string>;
 }
 
 // searchbar

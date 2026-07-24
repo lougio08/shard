@@ -5,8 +5,9 @@ import { WelcomeProfileModal, InventoryManagementModal } from "../components";
 import { useCustomRates, useCalculatorState } from "../hooks";
 import { DataService } from "../services";
 import type { CalculationFormData } from "../schemas";
-import type { CalculationResult, CalculationParams, RecipeOverride, Data, InventoryCalculationResult } from "../types/types";
+import type { CalculationResult, CalculationParams, RecipeOverride, Data, InventoryCalculationResult, PriceInfo } from "../types/types";
 import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards } from "../utilities";
+import { detectSuspiciousOrderBookPrices } from "../utilities/profitUtils";
 import { calculateMultipleShardsParallel, calculateOptimalPathWithWorker, calculateInventoryWithWorker, type WorkerProgress } from "../services/workerCalculationService";
 import { MAX_QUANTITIES } from "../constants";
 
@@ -18,7 +19,11 @@ const CalculatorFormWithContext: React.FC<{
   ownedAttributes?: Map<string, number>;
   useInventory: boolean;
   onUseInventoryChange: (enabled: boolean) => void;
-}> = ({ onSubmit, inventory, ownedAttributes, useInventory, onUseInventoryChange }) => {
+  filterLowVolume?: boolean;
+  onFilterLowVolumeChange?: (v: boolean) => void;
+  filterVolatile?: boolean;
+  onFilterVolatileChange?: (v: boolean) => void;
+}> = ({ onSubmit, inventory, ownedAttributes, useInventory, onUseInventoryChange, filterLowVolume, onFilterLowVolumeChange, filterVolatile, onFilterVolatileChange }) => {
   const { setForm } = useCalculatorState();
   const stableOnSubmit = useCallback((data: CalculationFormData) => onSubmit(data, setForm), [onSubmit, setForm]);
   return (
@@ -28,6 +33,10 @@ const CalculatorFormWithContext: React.FC<{
       ownedAttributes={ownedAttributes}
       useInventory={useInventory}
       onUseInventoryChange={onUseInventoryChange}
+      filterLowVolume={filterLowVolume}
+      onFilterLowVolumeChange={onFilterLowVolumeChange}
+      filterVolatile={filterVolatile}
+      onFilterVolatileChange={onFilterVolatileChange}
     />
   );
 };
@@ -266,6 +275,10 @@ const CalculatorPageContent: React.FC = () => {
   const [recipeOverrides, setRecipeOverrides] = useState<RecipeOverride[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
   const [progress, setProgress] = useState<WorkerProgress | null>(null);
+  const [filterLowVolume, setFilterLowVolume] = useState(true);
+  const [filterVolatile, setFilterVolatile] = useState(true);
+  const [bazaarPrices, setBazaarPrices] = useState<Record<string, PriceInfo> | null>(null);
+  const [suspiciousPriceShards, setSuspiciousPriceShards] = useState<Set<string>>(new Set());
 
   // Welcome modal state (first visit only)
   const [showWelcome, setShowWelcome] = useState(false);
@@ -364,6 +377,19 @@ const CalculatorPageContent: React.FC = () => {
   useEffect(() => { saveInventory(inventory); }, [inventory]);
   useEffect(() => { saveOwnedAttributes(ownedAttributes); }, [ownedAttributes]);
   useEffect(() => { saveDisabledShards(disabledShards); }, [disabledShards]);
+
+  // Fetch bazaar price info when calculation data is available
+  useEffect(() => {
+    if (calculationData) {
+      DataService.getInstance().fetchBazaarInfosWithOrders().then(({ prices, orderBooks }) => {
+        setBazaarPrices(prices);
+        const suspicious = detectSuspiciousOrderBookPrices(orderBooks);
+        setSuspiciousPriceShards(suspicious);
+      }).catch(() => {});
+    } else {
+      setBazaarPrices(null);
+    }
+  }, [calculationData, form.ironManView]);
 
   // Inventory tree expand/collapse handlers
   const handleToggle = useCallback((nodeId: string) => {
@@ -712,6 +738,10 @@ const CalculatorPageContent: React.FC = () => {
                 ownedAttributes={ownedAttributes}
                 useInventory={useInventory}
                 onUseInventoryChange={handleUseInventoryChange}
+                filterLowVolume={filterLowVolume}
+                onFilterLowVolumeChange={setFilterLowVolume}
+                filterVolatile={filterVolatile}
+                onFilterVolatileChange={setFilterVolatile}
               />
             </div>
           </div>
@@ -749,6 +779,10 @@ const CalculatorPageContent: React.FC = () => {
                 inventory={inventory}
                 disabledShards={disabledShards}
                 onDisabledShardsChange={setDisabledShards}
+                bazaarPrices={bazaarPrices}
+                filterLowVolume={filterLowVolume}
+                filterVolatile={filterVolatile}
+                suspiciousPriceShards={suspiciousPriceShards}
               />
             )}
 
@@ -767,6 +801,10 @@ const CalculatorPageContent: React.FC = () => {
                 onResetRecipeOverrides={resetRecipeOverrides}
                 ironManView={form.ironManView}
                 materialsOnly={form.materialsOnly}
+                filterLowVolume={filterLowVolume}
+                filterVolatile={filterVolatile}
+                bazaarPrices={bazaarPrices}
+                suspiciousPriceShards={suspiciousPriceShards}
               />
             )}
 

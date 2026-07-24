@@ -1,4 +1,5 @@
 import type { ShardWithKey, Shard } from "../types/types";
+import type { PriceInfo } from "../types/types";
 import { sortShardsByNameWithPrefixAwareness, filterShards, BASIC_FILTER_CONFIG, NAME_ONLY_FILTER_CONFIG } from "../utilities";
 
 interface FusionData {
@@ -11,6 +12,25 @@ interface BazaarCache {
   timestamp: number;
 }
 
+interface HypixelOrderBookEntry {
+  amount: number;
+  pricePerUnit: number;
+  orders: number;
+}
+
+interface HypixelProduct {
+  quick_status: {
+    buyPrice: number;
+    sellPrice: number;
+    buyVolume: number;
+    sellVolume: number;
+    buyMovingWeek: number;
+    sellMovingWeek: number;
+  };
+  sell_summary?: HypixelOrderBookEntry[];
+  buy_summary?: HypixelOrderBookEntry[];
+}
+
 export class DataService {
   private static instance: DataService;
   private shardsCache: ShardWithKey[] | null = null;
@@ -18,6 +38,8 @@ export class DataService {
   private defaultRatesCache: Record<string, number> | null = null;
   private fusionDataCache: FusionData | null = null;
   private bazaarPriceCache: BazaarCache | null = null;
+  private bazaarRawProductsCache: Record<string, HypixelProduct> | null = null;
+  private bazaarRawTimestamp: number = 0;
   private readonly BAZAAR_CACHE_TTL = 120_000;
 
   public static getInstance(): DataService {
@@ -39,6 +61,47 @@ export class DataService {
     }
   }
 
+  private async fetchHypixelBazaarProducts(): Promise<Record<string, HypixelProduct>> {
+    const now = Date.now();
+    if (this.bazaarRawProductsCache && now - this.bazaarRawTimestamp < this.BAZAAR_CACHE_TTL) {
+      return this.bazaarRawProductsCache;
+    }
+    const response = await fetch("https://api.hypixel.net/v2/skyblock/bazaar");
+    if (!response.ok) {
+      throw new Error(`Hypixel API error: ${response.status}`);
+    }
+    const json = await response.json();
+    const products: Record<string, HypixelProduct> = json.products || {};
+    this.bazaarRawProductsCache = products;
+    this.bazaarRawTimestamp = now;
+    return products;
+  }
+
+  async fetchBazaarPriceInfos(): Promise<Record<string, PriceInfo>> {
+    try {
+      const products = await this.fetchHypixelBazaarProducts();
+      const shards = await this.loadShards();
+      const infos: Record<string, PriceInfo> = {};
+      for (const shard of shards) {
+        const product = products[shard.internal_id];
+        if (product?.quick_status) {
+          const qs = product.quick_status;
+          infos[shard.id] = {
+            buyCost: qs.buyPrice,
+            sellRevenue: qs.sellPrice,
+            buyVolume: qs.buyVolume,
+            sellVolume: qs.sellVolume,
+            dailyBuyVolume: qs.buyMovingWeek / 7,
+            dailySellVolume: qs.sellMovingWeek / 7,
+          };
+        }
+      }
+      return infos;
+    } catch {
+      return {};
+    }
+  }
+
   async loadShardCosts(useInstantBuyPrices: boolean): Promise<Record<string, number>> {
     const now = Date.now();
     if (this.bazaarPriceCache && now - this.bazaarPriceCache.timestamp < this.BAZAAR_CACHE_TTL) {
@@ -46,13 +109,7 @@ export class DataService {
     }
 
     try {
-      const response = await fetch("https://api.hypixel.net/v2/skyblock/bazaar");
-      if (!response.ok) {
-        throw new Error(`Hypixel API error: ${response.status}`);
-      }
-      const json = await response.json();
-      const products: Record<string, { quick_status: { buyPrice: number; sellPrice: number } }> = json.products || {};
-
+      const products = await this.fetchHypixelBazaarProducts();
       const shards = await this.loadShards();
       const costs: Record<string, number> = {};
       for (const shard of shards) {
@@ -174,5 +231,38 @@ export class DataService {
     }
 
     return this.sortShardsByQuery(filtered, query);
+  }
+
+  async fetchBazaarInfosWithOrders(): Promise<{
+    prices: Record<string, PriceInfo>;
+    orderBooks: Record<string, { sellSummary: HypixelOrderBookEntry[]; buySummary: HypixelOrderBookEntry[] }>;
+  }> {
+    try {
+      const products = await this.fetchHypixelBazaarProducts();
+      const shards = await this.loadShards();
+      const prices: Record<string, PriceInfo> = {};
+      const orderBooks: Record<string, { sellSummary: HypixelOrderBookEntry[]; buySummary: HypixelOrderBookEntry[] }> = {};
+      for (const shard of shards) {
+        const product = products[shard.internal_id];
+        if (product?.quick_status) {
+          const qs = product.quick_status;
+          prices[shard.id] = {
+            buyCost: qs.buyPrice,
+            sellRevenue: qs.sellPrice,
+            buyVolume: qs.buyVolume,
+            sellVolume: qs.sellVolume,
+            dailyBuyVolume: qs.buyMovingWeek / 7,
+            dailySellVolume: qs.sellMovingWeek / 7,
+          };
+          orderBooks[shard.id] = {
+            sellSummary: product.sell_summary ?? [],
+            buySummary: product.buy_summary ?? [],
+          };
+        }
+      }
+      return { prices, orderBooks };
+    } catch {
+      return { prices: {}, orderBooks: {} };
+    }
   }
 }
