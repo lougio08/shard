@@ -144,6 +144,20 @@ export interface CalculationResultsProps {
   suspiciousPriceShards?: Set<string>;
 }
 
+export interface HistoryPoint {
+  minBuy: number;
+  maxBuy: number;
+  buy: number;
+  minSell: number;
+  maxSell: number;
+  sell: number;
+  buyVolume: number;
+  sellVolume: number;
+  buyMovingWeek: number;
+  sellMovingWeek: number;
+  timestamp: string;
+}
+
 export interface PriceInfo {
   buyCost: number;
   sellRevenue: number;

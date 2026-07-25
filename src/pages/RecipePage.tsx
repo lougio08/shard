@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ShardAutocomplete, RecipeCountBadge, SearchFilterInput, ShardDisplay, DropdownButton } from "../components";
-import { getRarityColor, formatLargeNumber, loadBazaarCache, getTreeBuyNodes, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectVolatileShards } from "../utilities";
+import { getRarityColor, formatLargeNumber, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData } from "../utilities";
+import { applyStableFilter, getUnstableShardIds } from "../utilities/stableFilter";
 import { useFusionData, useDropdownManager, useRecipeState } from "../hooks";
 import { processOutputRecipes, categorizeAndGroupRecipes, filterCategorizedRecipes, type Recipe, type CategorizedRecipes, type GroupedRecipe, type FusionData } from "../utilities";
 import { DataService } from "../services/dataService";
 import { CalculationService } from "../services/calculationService";
 import { TrendingUp, TrendingDown, ShieldCheck, AlertTriangle } from "lucide-react";
 import type { ShardWithKey, PriceInfo, Data, RecipeChoice } from "../types/types";
-
-const MIN_BUY_VOLUME = 3000;
-const MIN_SELL_VOLUME = 1000;
 
 function getInputRecipes(shard: ShardWithKey, fusionData: FusionData): Recipe[] {
   const recipes: Recipe[] = [];
@@ -69,6 +67,7 @@ export const RecipePage = () => {
   const [sellMode, setSellMode] = useState<"order" | "instant">("order");
 
   const cachedPricesRef = useRef<Record<string, PriceInfo> | null>(null);
+  const cachedBaseDataRef = useRef<Data | null>(null);
   const cachedDataRef = useRef<Data | null>(null);
   const cachedChoicesRef = useRef<Map<string, RecipeChoice> | null>(null);
   const cachedCycleNodesRef = useRef<string[][]>([]);
@@ -76,11 +75,23 @@ export const RecipePage = () => {
 
   const recalcProfitFromCache = useCallback(() => {
     const prices = cachedPricesRef.current;
-    const data = cachedDataRef.current;
-    const choices = cachedChoicesRef.current;
-    const cycleNodes = cachedCycleNodesRef.current;
+    let data = cachedBaseDataRef.current;
     const shardKey = cachedShardRef.current;
-    if (!prices || !data || !choices || !shardKey || !fusionData) return;
+    if (!prices || !data || !shardKey || !fusionData) return;
+
+    const params = DEFAULT_CALCULATION_PARAMS;
+    const service = CalculationService.getInstance();
+
+    if (filterLowVolume) {
+      const excludedIds = getUnstableShardIds(prices);
+      if (excludedIds.size > 0) {
+        data = applyStableFilter(data, excludedIds);
+      }
+    }
+
+    const { choices, minCosts } = service.computeMinCosts(data, params);
+    const cycleNodes = service.findCycleNodes(choices);
+    const minCostsCache = { minCosts, choices };
 
     let bestProfit = -Infinity;
     let bestResult: {
@@ -90,9 +101,6 @@ export const RecipePage = () => {
       craftCost: number;
       sellRevenue: number;
     } | null = null;
-
-    const params = DEFAULT_CALCULATION_PARAMS;
-    const service = CalculationService.getInstance();
 
     for (const [outputShardId] of Object.entries(fusionData.recipes)) {
       const priceInfo = prices[outputShardId];
@@ -104,42 +112,9 @@ export const RecipePage = () => {
       if (!choice || choice.recipe === null) continue;
 
       const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-      const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params);
+      const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache);
       service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
       const stats = service.collectTreeStats(tree, params);
-
-      if (filterLowVolume || filterVolatile) {
-        const buyNodes = getTreeBuyNodes(tree);
-        if (filterLowVolume) {
-          const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
-          let volumeFailed = !outputVolumeOk;
-          if (!volumeFailed) {
-            for (const nodeId of buyNodes) {
-              const nodePrice = prices[nodeId];
-              if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
-                volumeFailed = true;
-                break;
-              }
-            }
-          }
-          if (volumeFailed) continue;
-        }
-        if (filterVolatile) {
-          const cached = loadBazaarCache();
-          const previousPrices = cached?.prices ?? null;
-          const volatileShardIds = detectVolatileShards(prices, previousPrices);
-          let volatileFailed = volatileShardIds.has(outputShardId);
-          if (!volatileFailed) {
-            for (const nodeId of buyNodes) {
-              if (volatileShardIds.has(nodeId)) {
-                volatileFailed = true;
-                break;
-              }
-            }
-          }
-          if (volatileFailed) continue;
-        }
-      }
 
       let totalMatCost = 0;
       let allMaterialsPriced = true;
@@ -202,7 +177,7 @@ export const RecipePage = () => {
       const ratesResponse = await fetch(`${import.meta.env.BASE_URL}rates.json`);
       const defaultRates = await ratesResponse.json();
 
-      const data = buildDataFromFusionData(fusionData, defaultRates);
+      let data = buildDataFromFusionData(fusionData, defaultRates);
 
       const prices: Record<string, PriceInfo> = {};
       for (const shard of shards) {
@@ -222,14 +197,25 @@ export const RecipePage = () => {
       const params = DEFAULT_CALCULATION_PARAMS;
 
       const service = CalculationService.getInstance();
-      const { choices } = service.computeMinCosts(data, params);
-      const cycleNodes = service.findCycleNodes(choices);
 
       cachedPricesRef.current = prices;
+      cachedBaseDataRef.current = data;
+      cachedShardRef.current = shard.key;
+
+      if (filterLowVolume) {
+        const excludedIds = getUnstableShardIds(prices);
+        if (excludedIds.size > 0) {
+          data = applyStableFilter(data, excludedIds);
+        }
+      }
+
+      const { choices, minCosts } = service.computeMinCosts(data, params);
+      const cycleNodes = service.findCycleNodes(choices);
+      const minCostsCache = { minCosts, choices };
+
       cachedDataRef.current = data;
       cachedChoicesRef.current = choices;
       cachedCycleNodesRef.current = cycleNodes;
-      cachedShardRef.current = shard.key;
 
       let bestProfit = -Infinity;
       let bestResult: {
@@ -239,10 +225,6 @@ export const RecipePage = () => {
         craftCost: number;
         sellRevenue: number;
       } | null = null;
-
-      const cached = loadBazaarCache();
-      const previousPrices = cached?.prices ?? null;
-      const volatileShardIds = detectVolatileShards(prices, previousPrices);
 
       for (const [outputShardId] of Object.entries(fusionData.recipes)) {
         const priceInfo = prices[outputShardId];
@@ -254,39 +236,9 @@ export const RecipePage = () => {
         if (!choice || choice.recipe === null) continue;
 
         const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-        const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params);
+        const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache);
         service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
         const stats = service.collectTreeStats(tree, params);
-
-        if (filterLowVolume || filterVolatile) {
-          const buyNodes = getTreeBuyNodes(tree);
-          if (filterLowVolume) {
-            const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
-            let volumeFailed = !outputVolumeOk;
-            if (!volumeFailed) {
-              for (const nodeId of buyNodes) {
-                const nodePrice = prices[nodeId];
-                if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
-                  volumeFailed = true;
-                  break;
-                }
-              }
-            }
-            if (volumeFailed) continue;
-          }
-          if (filterVolatile) {
-            let volatileFailed = volatileShardIds.has(outputShardId);
-            if (!volatileFailed) {
-              for (const nodeId of buyNodes) {
-                if (volatileShardIds.has(nodeId)) {
-                  volatileFailed = true;
-                  break;
-                }
-              }
-            }
-            if (volatileFailed) continue;
-          }
-        }
 
         let totalMatCost = 0;
         let allMaterialsPriced = true;
@@ -720,18 +672,18 @@ export const RecipePage = () => {
               <button
                 onClick={() => setFilterLowVolume(!filterLowVolume)}
                 className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
-                title={filterLowVolume ? "Filtering low-volume shards" : "Showing all shards"}
+                title={filterLowVolume ? "Filtrer les shards à faible volume d'achat" : "Afficher tous les shards"}
               >
                 <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
-                {filterLowVolume ? "Safe" : "All"}
+                {filterLowVolume ? "Stable" : "All"}
               </button>
               <button
                 onClick={() => setFilterVolatile(!filterVolatile)}
                 className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterVolatile ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
-                title={filterVolatile ? "Filtering volatile price shards" : "Showing all shards"}
+                title={filterVolatile ? "Détecter les prix anormaux via l'historique SkyCofl" : "Afficher tous les shards"}
               >
                 <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
-                {filterVolatile ? "Stable" : "All"}
+                {filterVolatile ? "Safe" : "All"}
               </button>
               <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
                 <button

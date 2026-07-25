@@ -1,5 +1,5 @@
 import type { ShardWithKey, Shard } from "../types/types";
-import type { PriceInfo } from "../types/types";
+import type { PriceInfo, HistoryPoint } from "../types/types";
 import { sortShardsByNameWithPrefixAwareness, filterShards, BASIC_FILTER_CONFIG, NAME_ONLY_FILTER_CONFIG } from "../utilities";
 
 interface FusionData {
@@ -264,5 +264,107 @@ export class DataService {
     } catch {
       return { prices: {}, orderBooks: {} };
     }
+  }
+
+  async fetchSkyCoflBazaarPrices(shards: Shard[]): Promise<Record<string, PriceInfo> | null> {
+    const prices: Record<string, PriceInfo> = {};
+    const internalIds = shards
+      .map(s => s.internal_id)
+      .filter(id => id && id.trim() !== "");
+
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < internalIds.length; i += BATCH_SIZE) {
+      const batch = internalIds.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map(async (id) => {
+          const resp = await fetch(`https://sky.coflnet.com/api/bazaar/${id}/snapshot`, {
+            headers: { "User-Agent": "SkyShards/1.0 (+https://github.com/lougio08/shard)" },
+          });
+          if (!resp.ok) return null;
+          const data = await resp.json();
+          return { id, data };
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === "fulfilled" && result.value) {
+          const { id, data } = result.value;
+          const shard = shards.find(s => s.internal_id === id);
+          if (shard) {
+            prices[shard.id] = {
+              buyCost: data.buy ?? 0,
+              sellRevenue: data.sell ?? 0,
+              buyVolume: data.buyVolume ?? 0,
+              sellVolume: data.sellVolume ?? 0,
+              dailyBuyVolume: (data.buyMovingWeek ?? 0) / 7,
+              dailySellVolume: (data.sellMovingWeek ?? 0) / 7,
+            };
+          }
+        }
+      }
+
+      if (i + BATCH_SIZE < internalIds.length) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    return Object.keys(prices).length > 0 ? prices : null;
+  }
+
+  private historyCache = new Map<string, { data: HistoryPoint[]; fetchedAt: number }>();
+  private readonly HISTORY_CACHE_TTL_MS = 12 * 60 * 1000;
+
+  async fetchPriceHistory(internalId: string): Promise<HistoryPoint[] | null> {
+    const cached = this.historyCache.get(internalId);
+    if (cached && Date.now() - cached.fetchedAt < this.HISTORY_CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    try {
+      const resp = await fetch(`https://sky.coflnet.com/api/bazaar/${internalId}/history/day`, {
+        headers: { "User-Agent": "SkyShards/1.0 (+https://github.com/lougio08/shard)" },
+      });
+
+      if (resp.status === 429) {
+        console.warn(`[SkyCofl] Rate limited on history fetch for ${internalId}`);
+        return null;
+      }
+      if (!resp.ok) return null;
+
+      const data: HistoryPoint[] = await resp.json();
+      this.historyCache.set(internalId, { data, fetchedAt: Date.now() });
+      return data;
+    } catch (err) {
+      console.warn(`[SkyCofl] Failed to fetch history for ${internalId}:`, err);
+      return null;
+    }
+  }
+
+  async fetchPriceHistoriesForShards(internalIds: string[]): Promise<Map<string, HistoryPoint[] | null>> {
+    const results = new Map<string, HistoryPoint[] | null>();
+
+    const toFetch = internalIds.filter(id => {
+      const cached = this.historyCache.get(id);
+      return !cached || Date.now() - cached.fetchedAt >= this.HISTORY_CACHE_TTL_MS;
+    });
+
+    const BATCH_SIZE = 25;
+    const uniqueIds = [...new Set(toFetch)];
+
+    for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
+      const batch = uniqueIds.slice(i, i + BATCH_SIZE);
+      await Promise.allSettled(
+        batch.map(id => this.fetchPriceHistory(id))
+      );
+      if (i + BATCH_SIZE < uniqueIds.length) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    for (const id of internalIds) {
+      results.set(id, this.historyCache.get(id)?.data ?? null);
+    }
+
+    return results;
   }
 }

@@ -9,8 +9,7 @@ import pako from "pako";
 import { CopyTreeModal } from "../modals";
 
 const MIN_SHARD_VOLUME = 5000;
-const MIN_BUY_VOLUME = 3000;
-const MIN_SELL_VOLUME = 1000;
+const MIN_BUY_VOLUME = 5000;
 
 // Utility function to manage expanded states
 const useTreeExpansion = (tree: RecipeTree | null) => {
@@ -366,7 +365,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
       {!ironManView && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-300">
           <Info className="w-4 h-4 flex-shrink-0" />
-          <span>Bazaar volume: au moins <strong>{formatLargeNumber(MIN_SHARD_VOLUME)} shards</strong> achetés et vendus dans les dernières 24h pour que la stratégie soit viable.</span>
+          <span>Volume d'achat quotidien minimum : <strong>{formatLargeNumber(MIN_BUY_VOLUME)} shards</strong> pour que la stratégie soit viable.</span>
         </div>
       )}
       {/* Materials Needed */}
@@ -438,14 +437,12 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             .filter(([shardId]) => {
               if (ironManView || !bazaarPrices) return true;
               const priceInfo = bazaarPrices[shardId];
-              if (filterVolatile && suspiciousPriceShards?.has(shardId)) {
-                return false;
-              }
+              // "Stable" = filtre volume : dailyBuyVolume < 5000
               if (filterLowVolume) {
                 if (!priceInfo) return false;
-                const volumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
-                if (!volumeOk) return false;
+                if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME) return false;
               }
+              // "Safe" = anomalie prix → ne filtre PAS (warning dans RecipeTreeNode)
               return true;
             })
             .map(([shardId, quantity]) => {

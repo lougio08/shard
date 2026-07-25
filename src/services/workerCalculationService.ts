@@ -19,6 +19,8 @@ type WorkerStartMsg = {
   requiredQuantity: number;
   params: CalculationParams;
   recipeOverrides: RecipeOverride[];
+  excludedShardIds?: string[];
+  keepShardId?: string;
 };
 
 type WorkerBatchStartWithDataMsg = {
@@ -26,6 +28,7 @@ type WorkerBatchStartWithDataMsg = {
   targets: Array<{ shard: string; quantity: number }>;
   params: CalculationParams;
   recipeOverrides: RecipeOverride[];
+  excludedShardIds?: string[];
 };
 
 type WorkerBatchMsg =
@@ -46,6 +49,8 @@ type InventoryWorkerStartMsg = {
   recipeOverrides: RecipeOverride[];
   inventory: Record<string, number>;
   ownedAttributes: Record<string, number>;
+  excludedShardIds?: string[];
+  keepShardId?: string;
 };
 
 export function calculateOptimalPathWithWorker(
@@ -53,7 +58,9 @@ export function calculateOptimalPathWithWorker(
   requiredQuantity: number,
   params: CalculationParams,
   recipeOverrides: RecipeOverride[] = [],
-  onProgress?: (p: WorkerProgress) => void
+  onProgress?: (p: WorkerProgress) => void,
+  excludedShardIds?: string[],
+  keepShardId?: string
 ): { promise: Promise<{ result: CalculationResult; parsedData: Data }>; cancel: () => void } {
   const worker = new Worker(new URL("../workers/calculationWorker.ts", import.meta.url), { type: "module" });
   let cancelled = false;
@@ -84,6 +91,8 @@ export function calculateOptimalPathWithWorker(
       requiredQuantity,
       params,
       recipeOverrides,
+      excludedShardIds,
+      keepShardId,
     };
     worker.postMessage(startMsg);
   });
@@ -103,7 +112,9 @@ export function calculateInventoryWithWorker(
   recipeOverrides: RecipeOverride[],
   inventory: Map<string, number>,
   ownedAttributes: Map<string, number>,
-  onProgress?: (p: WorkerProgress) => void
+  onProgress?: (p: WorkerProgress) => void,
+  excludedShardIds?: string[],
+  keepShardId?: string
 ): { promise: Promise<{ result: InventoryCalculationResult; parsedData: Data }>; cancel: () => void } {
   const worker = new Worker(new URL("../workers/calculationWorker.ts", import.meta.url), { type: "module" });
   let cancelled = false;
@@ -141,6 +152,8 @@ export function calculateInventoryWithWorker(
       recipeOverrides,
       inventory: inventoryObj,
       ownedAttributes: ownedAttributesObj,
+      excludedShardIds,
+      keepShardId,
     };
     worker.postMessage(startMsg);
   });
@@ -157,7 +170,8 @@ export function calculateMultipleShardsParallel(
   targets: Array<{ shard: string; quantity: number }>,
   params: CalculationParams,
   recipeOverrides: RecipeOverride[] = [],
-  onProgress?: (p: WorkerProgress) => void
+  onProgress?: (p: WorkerProgress) => void,
+  excludedShardIds?: string[]
 ): { promise: Promise<{ results: CalculationResult[]; parsedData: Data }>; cancel: () => void } {
   const maxWorkers = Math.min(navigator.hardwareConcurrency || 4, 8, targets.length);
 
@@ -282,6 +296,7 @@ export function calculateMultipleShardsParallel(
         targets: chunk,
         params,
         recipeOverrides,
+        excludedShardIds,
       };
       worker.postMessage(startMsg);
     });

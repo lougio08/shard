@@ -1,5 +1,6 @@
-import type { CalculationParams, CalculationResult, RecipeOverride, Data, RecipeChoice, InventoryCalculationResult } from "../types/types";
+import type { CalculationParams, CalculationResult, RecipeOverride, Data, InventoryCalculationResult } from "../types/types";
 import { CalculationService, InvCalculationService } from "../services";
+import { applyStableFilter } from "../utilities/stableFilter";
 
 interface StartMsg {
   type: "start";
@@ -7,6 +8,8 @@ interface StartMsg {
   requiredQuantity: number;
   params: CalculationParams;
   recipeOverrides: RecipeOverride[];
+  excludedShardIds?: string[];
+  keepShardId?: string;
 }
 
 interface BatchStartWithDataMsg {
@@ -14,6 +17,7 @@ interface BatchStartWithDataMsg {
   targets: Array<{ shard: string; quantity: number }>;
   params: CalculationParams;
   recipeOverrides: RecipeOverride[];
+  excludedShardIds?: string[];
 }
 
 interface InventoryCalculationMsg {
@@ -24,6 +28,8 @@ interface InventoryCalculationMsg {
   recipeOverrides: RecipeOverride[];
   inventory: Record<string, number>;
   ownedAttributes: Record<string, number>;
+  excludedShardIds?: string[];
+  keepShardId?: string;
 }
 
 type ProgressPhase = "parsing" | "computing" | "building" | "assigning" | "finalizing";
@@ -84,11 +90,15 @@ self.onmessage = async (e: MessageEvent<StartMsg | BatchStartWithDataMsg | Inven
 };
 
 async function handleSingleCalculation(data: StartMsg) {
-  const { targetShard, requiredQuantity, params, recipeOverrides } = data;
+  const { targetShard, requiredQuantity, params, recipeOverrides, excludedShardIds, keepShardId } = data;
 
   try {
     const service = CalculationService.getInstance();
-    const parsedData = await service.parseData(params);
+    let parsedData = await service.parseData(params);
+
+    if (excludedShardIds && excludedShardIds.length > 0) {
+      parsedData = applyStableFilter(parsedData, new Set(excludedShardIds), keepShardId);
+    }
 
     if (!parsedData.shards[targetShard]) {
       const emptyResult: CalculationResult = {
@@ -105,11 +115,12 @@ async function handleSingleCalculation(data: StartMsg) {
     }
 
     post({ type: "progress", phase: "computing", progress: 0, message: "Computing optimal costs..." });
-    const { choices } = service.computeMinCosts(parsedData, params, recipeOverrides);
+    const { choices, minCosts } = service.computeMinCosts(parsedData, params, recipeOverrides);
+    const minCostsCache = { minCosts, choices };
 
     post({ type: "progress", phase: "building", progress: 0.4, message: "Building recipe tree..." });
     const cycleNodes = params.crocodileLevel > 0 || recipeOverrides.length > 0 ? service.findCycleNodes(choices) : [];
-    const tree = service.buildRecipeTree(parsedData, targetShard, choices, cycleNodes, params, recipeOverrides);
+    const tree = service.buildRecipeTree(parsedData, targetShard, choices, cycleNodes, params, recipeOverrides, minCostsCache);
 
     post({ type: "progress", phase: "assigning", progress: 0.7, message: "Assigning quantities..." });
     const craftCounter = { total: 0 };
@@ -152,14 +163,19 @@ async function handleSingleCalculation(data: StartMsg) {
 }
 
 async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
-  const { targets, params, recipeOverrides } = data;
+  const { targets, params, recipeOverrides, excludedShardIds } = data;
 
   try {
     const service = CalculationService.getInstance();
-    const parsedData = await service.parseData(params);
+    let parsedData = await service.parseData(params);
 
-    const { choices: choicesMap } = service.computeMinCosts(parsedData, params, recipeOverrides);
+    if (excludedShardIds && excludedShardIds.length > 0) {
+      parsedData = applyStableFilter(parsedData, new Set(excludedShardIds));
+    }
+
+    const { choices: choicesMap, minCosts } = service.computeMinCosts(parsedData, params, recipeOverrides);
     const choices = new Map(choicesMap);
+    const minCostsCache = { minCosts, choices: new Map(choices) };
 
     const cycleNodes = params.crocodileLevel > 0 || recipeOverrides.length > 0 ? service.findCycleNodes(choices) : [];
 
@@ -188,7 +204,7 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
         continue;
       }
 
-      const tree = service.buildRecipeTree(parsedData, targetShard, choices, cycleNodes, params, recipeOverrides);
+      const tree = service.buildRecipeTree(parsedData, targetShard, choices, cycleNodes, params, recipeOverrides, minCostsCache);
 
       const craftCounter = { total: 0 };
       service.assignQuantities(tree, requiredQuantity, parsedData, craftCounter, choices, crocodileMultiplier, params, recipeOverrides);
@@ -241,12 +257,16 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
 }
 
 async function handleInventoryCalculation(data: InventoryCalculationMsg) {
-  const { targetShard, requiredQuantity, params, recipeOverrides, inventory, ownedAttributes } = data;
+  const { targetShard, requiredQuantity, params, recipeOverrides, inventory, ownedAttributes, excludedShardIds, keepShardId } = data;
 
   try {
     const service = CalculationService.getInstance();
     const invService = InvCalculationService.getInstance();
-    const parsedData = await service.parseData(params);
+    let parsedData = await service.parseData(params);
+
+    if (excludedShardIds && excludedShardIds.length > 0) {
+      parsedData = applyStableFilter(parsedData, new Set(excludedShardIds), keepShardId);
+    }
     const inventoryMap = new Map(Object.entries(inventory));
     const ownedAttributesMap = new Map(Object.entries(ownedAttributes));
 

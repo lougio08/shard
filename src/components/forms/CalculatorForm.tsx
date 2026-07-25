@@ -600,7 +600,7 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
                     className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${
                       filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
                     }`}
-                    title={filterLowVolume ? "Filtering low-volume shards" : "Showing all shards"}
+                    title={filterLowVolume ? "Filtrer les shards avec volume d'achat < 5000" : "Showing all shards"}
                   >
                     <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
                     {filterLowVolume ? "Stable" : "All"}
@@ -611,7 +611,7 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
                     className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${
                       filterVolatile ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
                     }`}
-                    title={filterVolatile ? "Filtering volatile price shards" : "Showing all shards"}
+                    title={filterVolatile ? "Détection d'anomalie de prix via historique 24h" : "Showing all shards"}
                   >
                     <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
                     {filterVolatile ? "Safe" : "All"}

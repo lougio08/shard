@@ -78,6 +78,15 @@ export const Layout: React.FC = () => {
             </a>
             <span className="text-slate-600">•</span>
             <span className="text-slate-600 text-xs">© {new Date().getFullYear()} SkyShards</span>
+            <span className="text-slate-600">•</span>
+            <a
+              href="https://sky.coflnet.com/data"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-500 hover:text-purple-400 transition-colors duration-200 text-xs font-medium"
+            >
+              Price data by SkyCofl
+            </a>
           </div>
         </div>
       </footer>

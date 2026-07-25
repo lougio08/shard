@@ -6,9 +6,7 @@ import { formatNumber } from "../../utilities";
 import type { RecipeTreeNodeProps, Recipe, Shard, RecipeTree, PriceInfo } from "../../types/types";
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
-
-const MIN_BUY_VOLUME = 3000;
-const MIN_SELL_VOLUME = 1000;
+import { STABLE_MIN_DAILY_BUY_VOLUME } from "../../utilities/stableFilter";
 
 export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   tree,
@@ -74,16 +72,19 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   const isShardFiltered = (shardId: string): { filtered: boolean; reason: string } => {
     if (!bazaarPrices || ironManView) return { filtered: false, reason: "" };
     const priceInfo = bazaarPrices[shardId];
-    if (filterVolatile && suspiciousPriceShards?.has(shardId)) {
-      return { filtered: true, reason: "suspicious" };
-    }
+    // "Stable" = filtre volume : shards sous le seuil sont masquées
     if (filterLowVolume) {
       if (!priceInfo) return { filtered: true, reason: "no price" };
-      if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME || priceInfo.dailySellVolume < MIN_SELL_VOLUME) {
+      if (priceInfo.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME) {
         return { filtered: true, reason: "volume" };
       }
     }
+    // "Safe" = ne masque PAS (juste un warning)
     return { filtered: false, reason: "" };
+  };
+
+  const isShardSuspicious = (shardId: string): boolean => {
+    return !!filterVolatile && !!suspiciousPriceShards?.has(shardId);
   };
 
   const renderChevron = (isExpanded: boolean) => (isExpanded ? <ChevronDown className="w-4 h-4 text-amber-400" /> : <ChevronRight className="w-4 h-4 text-amber-400" />);
@@ -107,10 +108,15 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
           <div className="flex items-center gap-2">
             <img src={`${import.meta.env.BASE_URL}shardIcons/${shard.id}.png`} alt={shard.name} className="w-5 h-5 object-contain flex-shrink-0" loading="lazy" />
             <span className={getRarityColor(shard.rarity)}>{shard.name}</span>
-            {!ironManView && bazaarPrices?.[shard.id] && (
-              (bazaarPrices[shard.id].dailyBuyVolume < 3000 || bazaarPrices[shard.id].dailySellVolume < 1000) && (
-                <span title="Low bazaar volume"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></span>
+            {/* "Stable" warning: low volume */}
+            {filterLowVolume && !ironManView && bazaarPrices?.[shard.id] && (
+              bazaarPrices[shard.id].dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME && (
+                <span title="Volume d'achat faible"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></span>
               )
+            )}
+            {/* "Safe" warning: price anomaly */}
+            {isShardSuspicious(shard.id) && (
+              <span title="Prix actuel ~30% sous la moyenne 24h — vérifier avant d'acheter/vendre"><AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" /></span>
             )}
           </div>
         </Tooltip>
@@ -220,8 +226,9 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   const renderDirectShard = (quantity: number, shard: Shard) => {
     const { filtered, reason } = isShardFiltered(shard.id);
     const isFiltered = filtered && !ironManView;
+    const suspicious = isShardSuspicious(shard.id);
     return (
-      <div className={`rounded border flex items-center justify-between px-3 py-1.5 text-sm font-medium gap-2 ${isFiltered ? "border-red-700/50 opacity-60" : "border-slate-400/50"}`}>
+      <div className={`rounded border flex items-center justify-between px-3 py-1.5 text-sm font-medium gap-2 ${isFiltered ? "border-red-700/50 opacity-60" : suspicious ? "border-red-500/30" : "border-slate-400/50"}`}>
         <div className="flex items-center gap-2 min-w-0">
           <div className={`w-2 h-2 rounded-full ${isFiltered ? "bg-red-400" : "bg-green-400"}`} />
           {isFiltered && <ShieldX className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
@@ -229,7 +236,7 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
           <span className={`px-1 py-0.4 text-xs border rounded-md flex-shrink-0 ${isFiltered ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-green-500/20 text-green-400 border-green-500/30"}`}>{ironManView ? "Direct" : "Bazaar"}</span>
           {isFiltered && (
             <span className="text-[10px] text-red-400 whitespace-nowrap">
-              {reason === "no price" ? "No price" : reason === "suspicious" ? "Suspicious price" : "Low volume"}
+              {reason === "no price" ? "No price" : "Low volume"}
             </span>
           )}
         </div>
@@ -252,6 +259,21 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
               </>
             )}
           </div>
+          {suspicious && onShowAlternatives && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowAlternatives(shard.id, {
+                  currentRecipe: null,
+                  requiredQuantity: quantity,
+                });
+              }}
+              className="px-1.5 py-1 text-xs bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/20 hover:border-red-500/30 rounded transition-colors cursor-pointer"
+              title="Voir les alternatives sans cette shard"
+            >
+              Voir alternative
+            </button>
+          )}
         </div>
       </div>
     );

@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, TrendingDown, BarChart3, RefreshCw, AlertCircle, Info, ShieldCheck, ShieldX, AlertTriangle, Hammer, Clock } from "lucide-react";
 import { useFusionData } from "../hooks";
-import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, getTreeBuyNodes, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectVolatileShards } from "../utilities";
+import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectPriceAnomaly, collectTreeShardIds } from "../utilities";
+import { applyStableFilter, getUnstableShardIds, STABLE_MIN_DAILY_BUY_VOLUME } from "../utilities/stableFilter";
 import { DataService } from "../services/dataService";
 import { CalculationService } from "../services/calculationService";
 import { RecipeTreeNode } from "../components/tree";
 import type { RecipeTree, PriceInfo, Data, RecipeChoice } from "../types/types";
 
-const MIN_BUY_VOLUME = 3000;
 const MIN_SELL_VOLUME = 1000;
 
 interface ProfitEntry {
@@ -128,6 +128,7 @@ export const ProfitabilityPage = () => {
   const [treeData, setTreeData] = useState<Data | null>(null);
   const [expandedStates, setExpandedStates] = useState<Map<string, boolean>>(new Map());
   const [staleShardIds, setStaleShardIds] = useState<Set<string>>(new Set());
+  const [suspiciousPriceShards, setSuspiciousPriceShards] = useState<Set<string>>(new Set());
   const previousPricesRef = useRef<Record<string, { buyCost: number; sellRevenue: number }> | null>(null);
   const backgroundFetchDoneRef = useRef(false);
 
@@ -223,20 +224,25 @@ export const ProfitabilityPage = () => {
         const dataService = DataService.getInstance();
         const defaultRates = await dataService.loadDefaultRates();
 
-        const data = buildDataFromFusionData(fusionData, defaultRates);
+        let data = buildDataFromFusionData(fusionData, defaultRates);
 
         if (cancelled) return;
 
         const params = DEFAULT_CALCULATION_PARAMS;
         const service = CalculationService.getInstance();
+
+        if (filterLowVolume) {
+          const excludedIds = getUnstableShardIds(currentPrices);
+          if (excludedIds.size > 0) {
+            data = applyStableFilter(data, excludedIds);
+          }
+        }
+
         const { choices, minCosts } = service.computeMinCosts(data, params);
         const cycleNodes = service.findCycleNodes(choices);
         const minCostsCache = { minCosts, choices };
 
         if (cancelled) return;
-
-        const prevPrices = previousPricesRef.current;
-        const volatileShardIds = detectVolatileShards(currentPrices, prevPrices);
 
         const shardBases: ShardBase[] = [];
         for (const [shardId, shard] of Object.entries(shardData)) {
@@ -261,26 +267,7 @@ export const ProfitabilityPage = () => {
             }
           }
 
-          const lowVolumeShards: string[] = [];
-          const volatileInTree: string[] = [];
-          const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
-
-          if (!outputVolumeOk) lowVolumeShards.push(shardId);
-
-          if (volatileShardIds.has(shardId)) volatileInTree.push(shardId);
-
-          if (effectiveTree) {
-            const buyNodes = getTreeBuyNodes(effectiveTree);
-            for (const nodeId of buyNodes) {
-              const nodePrice = currentPrices[nodeId];
-              if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
-                if (!lowVolumeShards.includes(nodeId)) lowVolumeShards.push(nodeId);
-              }
-              if (volatileShardIds.has(nodeId)) {
-                if (!volatileInTree.includes(nodeId)) volatileInTree.push(nodeId);
-              }
-            }
-          }
+          const volumeOk = priceInfo.dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
 
           shardBases.push({
             shardId,
@@ -290,10 +277,10 @@ export const ProfitabilityPage = () => {
             tree: effectiveTree,
             totalQuantities: entryTotalQuantities,
             craftsNeeded: entryCraftsNeeded,
-            volumeOk: lowVolumeShards.length === 0,
-            volatileOk: volatileInTree.length === 0,
-            lowVolumeShards,
-            volatileShards: volatileInTree,
+            volumeOk,
+            volatileOk: true,
+            lowVolumeShards: [],
+            volatileShards: [],
           });
         }
 
@@ -308,7 +295,7 @@ export const ProfitabilityPage = () => {
     })();
 
     return () => { cancelled = true; };
-  }, [fusionData, prices, fusionLoading, priceLoading]);
+  }, [fusionData, prices, fusionLoading, priceLoading, filterLowVolume]);
 
   useEffect(() => {
     if (heavyDataVersion === 0 || !heavyDataRef.current || !prices) return;
@@ -337,8 +324,6 @@ export const ProfitabilityPage = () => {
       } else {
         if (e.profit <= 0) return false;
       }
-      if (filterLowVolume && !e.volumeOk) return false;
-      if (filterVolatile && !e.volatileOk) return false;
       return true;
     });
     filtered.sort((a, b) => (sortBy === "profit" ? b.profit - a.profit : b.margin - a.margin));
@@ -373,6 +358,52 @@ export const ProfitabilityPage = () => {
     await fetchPrices();
     setRefreshing(false);
   };
+
+  // Fetch price history for "Safe" anomaly detection
+  useEffect(() => {
+    if (!filterVolatile || !treeData || !prices) {
+      return;
+    }
+
+    const treesWithShards: string[] = [];
+    for (const entry of results) {
+      if (entry.tree) {
+        treesWithShards.push(...collectTreeShardIds(entry.tree, treeData.shards));
+      }
+    }
+    const uniqueInternalIds = [...new Set(treesWithShards)];
+    if (uniqueInternalIds.length === 0) return;
+
+    let cancelled = false;
+
+    DataService.getInstance()
+      .fetchPriceHistoriesForShards(uniqueInternalIds)
+      .then((histories) => {
+        if (cancelled) return;
+
+        const suspicious = new Set<string>();
+        for (const [internalId, history] of histories) {
+          const shardEntry = Object.entries(treeData.shards).find(
+            ([, s]) => s.internal_id === internalId
+          );
+          if (!shardEntry) continue;
+          const shardId = shardEntry[0];
+
+          const priceInfo = prices[shardId];
+          if (!priceInfo) continue;
+
+          const anomaly = detectPriceAnomaly(priceInfo.sellRevenue, history, "sell");
+          if (anomaly.isAnomalous) {
+            suspicious.add(shardId);
+          }
+        }
+
+        setSuspiciousPriceShards(suspicious);
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, [filterVolatile, results, treeData, prices]);
 
   const handleToggle = useCallback((nodeId: string) => {
     setExpandedStates((prev) => {
@@ -439,18 +470,18 @@ export const ProfitabilityPage = () => {
             <button
               onClick={() => setFilterLowVolume(!filterLowVolume)}
               className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
-              title={filterLowVolume ? "Filtering low-volume shards" : "Showing all shards"}
+              title={filterLowVolume ? "Filtrer les shards à faible volume d'achat" : "Afficher tous les shards"}
             >
               <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
-              {filterLowVolume ? "Safe" : "All"}
+              {filterLowVolume ? "Stable" : "All"}
             </button>
             <button
               onClick={() => setFilterVolatile(!filterVolatile)}
               className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterVolatile ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
-              title={filterVolatile ? "Filtering volatile price shards" : "Showing all shards"}
+              title={filterVolatile ? "Détecter les prix anormaux via l'historique SkyCofl" : "Afficher tous les shards"}
             >
               <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
-              {filterVolatile ? "Stable" : "All"}
+              {filterVolatile ? "Safe" : "All"}
             </button>
             <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
               <button
@@ -530,7 +561,7 @@ export const ProfitabilityPage = () => {
           <div className="space-y-2">
             <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 border border-slate-700/50 rounded-lg text-xs text-slate-300">
               <Info className="w-4 h-4 flex-shrink-0 text-amber-400" />
-              <span>Achat 24h &ge; <strong>{formatLargeNumber(MIN_BUY_VOLUME)}</strong>, Vente 24h &ge; <strong>{formatLargeNumber(MIN_SELL_VOLUME)}</strong> requis — active/désactive le filtre avec le bouton <ShieldCheck className="w-3 h-3 inline-block text-emerald-400" /> <strong>Safe</strong>. Prix instable (&ge;50%) filtré par <AlertTriangle className="w-3 h-3 inline-block text-amber-400" /> <strong>Stable</strong>.</span>
+              <span>Achat 24h &ge; <strong>{formatLargeNumber(STABLE_MIN_DAILY_BUY_VOLUME)}</strong>, Vente 24h &ge; <strong>{formatLargeNumber(MIN_SELL_VOLUME)}</strong> requis — <ShieldCheck className="w-3 h-3 inline-block text-emerald-400" /> <strong>Stable</strong> filtre le volume. <AlertTriangle className="w-3 h-3 inline-block text-amber-400" /> <strong>Safe</strong> détecte les prix anormaux (pas de filtre, avertissement).</span>
             </div>
             {results.map((entry) => {
               const isProfitable = entry.profit > 0;
@@ -538,11 +569,11 @@ export const ProfitabilityPage = () => {
               return (
                 <div
                   key={entry.shardId}
-                  className={`bg-slate-800/40 border rounded-lg overflow-hidden ${!entry.volumeOk || !entry.volatileOk ? "border-red-700/30" : "border-slate-700/50"}`}
+                  className={`bg-slate-800/40 border rounded-lg overflow-hidden ${!entry.volumeOk ? "border-red-700/30" : "border-slate-700/50"}`}
                 >
                   <div className="p-3">
                     <div className="flex items-center gap-3">
-                      {entry.volumeOk && entry.volatileOk ? (
+                      {entry.volumeOk ? (
                         <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                       ) : (
                         <ShieldX className="w-4 h-4 text-red-400 flex-shrink-0" />
@@ -615,12 +646,21 @@ export const ProfitabilityPage = () => {
                       </div>
                     )}
 
-                    {entry.volatileShards.length > 0 && (
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-400">
-                        <AlertTriangle className="w-3 h-3" />
-                        <span>Prix instable (&ge;50%): {entry.volatileShards.map((id) => fusionData!.shards[id]?.name ?? id).join(", ")}</span>
-                      </div>
-                    )}
+                    {(() => {
+                      if (filterVolatile && entry.tree) {
+                        const treeShards = collectTreeShardIds(entry.tree, treeData!.shards);
+                        const suspiciousInEntry = treeShards.filter(id => suspiciousPriceShards.has(id));
+                        if (suspiciousInEntry.length > 0) {
+                          return (
+                            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-400">
+                              <AlertTriangle className="w-3 h-3" />
+                              <span>Prix anormal détecté: {suspiciousInEntry.map((id) => fusionData!.shards[id]?.name ?? id).join(", ")}</span>
+                            </div>
+                          );
+                        }
+                      }
+                      return null;
+                    })()}
 
                     {viewMode === "craft" && entry.tree && entry.tree.method !== "direct" && treeData && (
                       <div className="mt-2 pt-2 border-t border-slate-700/30">
@@ -635,6 +675,9 @@ export const ProfitabilityPage = () => {
                           noWoodenBait={false}
                           ironManView={false}
                           bazaarPrices={prices ?? undefined}
+                          filterLowVolume={filterLowVolume}
+                          filterVolatile={filterVolatile}
+                          suspiciousPriceShards={suspiciousPriceShards}
                         />
                       </div>
                     )}
@@ -703,7 +746,7 @@ export const ProfitabilityPage = () => {
                     })()}
                     {outVol && (
                       <div className="mt-1.5 flex gap-3 text-[11px] text-slate-500">
-                        <span>Achat 24h: <span className={outVol.dailyBuyVolume >= MIN_BUY_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailyBuyVolume)}</span></span>
+                        <span>Achat 24h: <span className={outVol.dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailyBuyVolume)}</span></span>
                         <span>Vente 24h: <span className={outVol.dailySellVolume >= MIN_SELL_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailySellVolume)}</span></span>
                       </div>
                     )}

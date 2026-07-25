@@ -1,5 +1,6 @@
-import type { Data, CalculationParams, RecipeTree, PriceInfo } from "../types/types";
+import type { Data, CalculationParams, RecipeTree, PriceInfo, HistoryPoint, Shard } from "../types/types";
 import type { FusionData } from "./recipeUtils";
+import { STABLE_MIN_DAILY_BUY_VOLUME } from "./stableFilter";
 
 const PRICE_SWING_THRESHOLD = 0.5;
 
@@ -131,3 +132,65 @@ export function detectSuspiciousOrderBookPrices(
 }
 
 export { PRICE_SWING_THRESHOLD };
+
+export const PRICE_ANOMALY_THRESHOLD = 0.30;
+
+export interface PriceAnomalyResult {
+  isAnomalous: boolean;
+  currentPrice: number;
+  averagePrice24h: number;
+  dropPercent: number;
+}
+
+export function detectPriceAnomaly(
+  currentPrice: number,
+  history: HistoryPoint[] | null,
+  field: "buy" | "sell"
+): PriceAnomalyResult {
+  if (!history || history.length === 0) {
+    return { isAnomalous: false, currentPrice, averagePrice24h: currentPrice, dropPercent: 0 };
+  }
+
+  const values = history.map((p) => p[field]).filter((v) => v > 0);
+  if (values.length === 0) {
+    return { isAnomalous: false, currentPrice, averagePrice24h: currentPrice, dropPercent: 0 };
+  }
+
+  const average = values.reduce((a, b) => a + b, 0) / values.length;
+  const dropPercent = average > 0 ? (average - currentPrice) / average : 0;
+
+  return {
+    isAnomalous: dropPercent > PRICE_ANOMALY_THRESHOLD,
+    currentPrice,
+    averagePrice24h: average,
+    dropPercent,
+  };
+}
+
+export function isStableVolume(dailyBuyVolume: number): boolean {
+  return dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME;
+}
+
+export function collectTreeShardIds(
+  tree: RecipeTree,
+  shards: Record<string, Shard>,
+  visited = new Set<string>()
+): string[] {
+  if (visited.has(tree.shard)) return [];
+  visited.add(tree.shard);
+
+  const ids: string[] = [];
+  const internalId = shards[tree.shard]?.internal_id;
+  if (internalId) ids.push(internalId);
+
+  if (tree.method === "recipe" && tree.inputs) {
+    ids.push(...collectTreeShardIds(tree.inputs[0], shards, visited));
+    ids.push(...collectTreeShardIds(tree.inputs[1], shards, visited));
+  }
+  if (tree.method === "cycle") {
+    if (tree.inputRecipe) ids.push(...collectTreeShardIds(tree.inputRecipe, shards, visited));
+    tree.cycleInputs.forEach((ci) => ids.push(...collectTreeShardIds(ci, shards, visited)));
+  }
+
+  return ids;
+}

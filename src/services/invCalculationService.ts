@@ -791,6 +791,7 @@ export class InvCalculationService {
     }
 
     const { minCosts, choices } = this.service.computeMinCosts(parsed, params, recipeOverrides);
+    const minCostsCache = { minCosts, choices };
 
     const exclusivityScores = this.service.computeExclusivityScores(parsed, minCosts);
 
@@ -815,7 +816,8 @@ export class InvCalculationService {
         choices,
         cycleNodes,
         params,
-        recipeOverrides
+        recipeOverrides,
+        minCostsCache
       );
       const craftCounter = { total: 0 };
       this.service.assignQuantities(

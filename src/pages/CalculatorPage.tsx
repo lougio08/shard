@@ -6,8 +6,9 @@ import { useCustomRates, useCalculatorState } from "../hooks";
 import { DataService } from "../services";
 import type { CalculationFormData } from "../schemas";
 import type { CalculationResult, CalculationParams, RecipeOverride, Data, InventoryCalculationResult, PriceInfo } from "../types/types";
-import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards } from "../utilities";
-import { detectSuspiciousOrderBookPrices } from "../utilities/profitUtils";
+import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards, loadBazaarCache } from "../utilities";
+import { getUnstableShardIds } from "../utilities/stableFilter";
+import { detectSuspiciousOrderBookPrices, detectPriceAnomaly, collectTreeShardIds } from "../utilities/profitUtils";
 import { calculateMultipleShardsParallel, calculateOptimalPathWithWorker, calculateInventoryWithWorker, type WorkerProgress } from "../services/workerCalculationService";
 import { MAX_QUANTITIES } from "../constants";
 
@@ -55,7 +56,8 @@ const performCalculation = async (
     setCalculationData: (data: Data | null) => void;
     setCalculating: (v: boolean) => void;
     setProgress: (p: WorkerProgress | null) => void;
-  }
+  },
+  filterLowVolume?: boolean
 ): Promise<(() => void) | null> => {
   let isCancelled = false;
 
@@ -112,6 +114,15 @@ const performCalculation = async (
     callbacks.setCalculating(true);
     callbacks.setProgress(null);
 
+    let excludedShardIds: string[] | undefined;
+    if (filterLowVolume) {
+      const cached = loadBazaarCache();
+      if (cached) {
+        const excluded = getUnstableShardIds(cached.prices);
+        if (excluded.size > 0) excludedShardIds = [...excluded];
+      }
+    }
+
     const shardQuantitiesMap = new Map<string, number>();
     if (formData.shardQuantities) {
       formData.shardQuantities.forEach((item: { shard?: { key: string }; quantity?: number }) => {
@@ -130,7 +141,8 @@ const performCalculation = async (
       targets,
       params,
       recipeOverrides,
-      (p) => !checkCancelled() && callbacks.setProgress(p)
+      (p) => !checkCancelled() && callbacks.setProgress(p),
+      excludedShardIds
     );
 
     promise
@@ -240,12 +252,27 @@ const performCalculation = async (
   callbacks.setCalculating(true);
   callbacks.setProgress({ phase: "parsing", progress: 0, message: "Starting..." });
 
+  let excludedShardIds: string[] | undefined;
+  let keepShardId: string | undefined;
+  if (filterLowVolume) {
+    const cached = loadBazaarCache();
+    if (cached) {
+      const excluded = getUnstableShardIds(cached.prices);
+      if (excluded.size > 0) {
+        excludedShardIds = [...excluded];
+        keepShardId = shardKey;
+      }
+    }
+  }
+
   const { promise, cancel: workerCancel } = calculateOptimalPathWithWorker(
     shardKey,
     formData.quantity,
     params,
     recipeOverrides,
-    (p) => !checkCancelled() && callbacks.setProgress(p)
+    (p) => !checkCancelled() && callbacks.setProgress(p),
+    excludedShardIds,
+    keepShardId
   );
 
   promise
@@ -391,6 +418,46 @@ const CalculatorPageContent: React.FC = () => {
     }
   }, [calculationData, form.ironManView]);
 
+  // Fetch price history for "Safe" anomaly detection
+  useEffect(() => {
+    if (!filterVolatile || !result?.tree || !calculationData || !bazaarPrices) {
+      return;
+    }
+
+    const internalIds = collectTreeShardIds(result.tree, calculationData.shards);
+    if (internalIds.length === 0) return;
+
+    let cancelled = false;
+
+    DataService.getInstance()
+      .fetchPriceHistoriesForShards(internalIds)
+      .then((histories) => {
+        if (cancelled) return;
+
+        const suspicious = new Set<string>();
+        for (const [internalId, history] of histories) {
+          const shardEntry = Object.entries(calculationData.shards).find(
+            ([, s]) => s.internal_id === internalId
+          );
+          if (!shardEntry) continue;
+          const shardId = shardEntry[0];
+
+          const priceInfo = bazaarPrices[shardId];
+          if (!priceInfo) continue;
+
+          const anomaly = detectPriceAnomaly(priceInfo.sellRevenue, history, "sell");
+          if (anomaly.isAnomalous) {
+            suspicious.add(shardId);
+          }
+        }
+
+        setSuspiciousPriceShards(suspicious);
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, [filterVolatile, result?.tree, calculationData, bazaarPrices]);
+
   // Inventory tree expand/collapse handlers
   const handleToggle = useCallback((nodeId: string) => {
     setExpandedStates(prev => {
@@ -491,6 +558,19 @@ const CalculatorPageContent: React.FC = () => {
     setIsCalculating(true);
 
     try {
+      let excludedShardIds: string[] | undefined;
+      let keepShardId: string | undefined;
+      if (filterLowVolume) {
+        const cached = loadBazaarCache();
+        if (cached) {
+          const excluded = getUnstableShardIds(cached.prices);
+          if (excluded.size > 0) {
+            excludedShardIds = [...excluded];
+            keepShardId = shardKey;
+          }
+        }
+      }
+
       const filteredInventory = new Map([...inventory].filter(([id]) => !disabledShards.has(id)));
       const { promise } = calculateInventoryWithWorker(
         shardKey,
@@ -499,6 +579,9 @@ const CalculatorPageContent: React.FC = () => {
         recipeOverrides,
         filteredInventory,
         ownedAttributes,
+        undefined,
+        excludedShardIds,
+        keepShardId
       );
       const { result: calculationResult, parsedData } = await promise;
 
@@ -511,7 +594,7 @@ const CalculatorPageContent: React.FC = () => {
     } finally {
       setIsCalculating(false);
     }
-  }, [customRates, inventory, disabledShards, recipeOverrides]);
+  }, [customRates, inventory, disabledShards, recipeOverrides, filterLowVolume]);
 
   // ─── Standard debounced calculation ───
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -554,7 +637,7 @@ const CalculatorPageContent: React.FC = () => {
           };
 
           try {
-            cancelRef.current = await performCalculation(formData, customRates, recipeOverrides, callbacks);
+            cancelRef.current = await performCalculation(formData, customRates, recipeOverrides, callbacks, filterLowVolume);
           } catch (err) {
             if (err instanceof Error && !err.message.includes("not found")) {
               console.error("Calculation failed:", err);
@@ -563,7 +646,7 @@ const CalculatorPageContent: React.FC = () => {
         }
       }, delay);
     },
-    [customRates, recipeOverrides, useInventory, performInventoryCalculation, setTargetShardName, setCurrentShardKey, setCurrentQuantity, setCurrentParams, setResult, setCalculationData]
+    [customRates, recipeOverrides, useInventory, performInventoryCalculation, filterLowVolume, setTargetShardName, setCurrentShardKey, setCurrentQuantity, setCurrentParams, setResult, setCalculationData]
   );
 
   const formRef = useRef(form);
@@ -607,7 +690,7 @@ const CalculatorPageContent: React.FC = () => {
       debouncedCalculate(currentForm, 150).catch(console.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customRates, recipeOverrides, inventory, useInventory, debouncedCalculate]);
+  }, [customRates, recipeOverrides, inventory, useInventory, filterLowVolume, debouncedCalculate]);
 
   // Initialize params from form for inventory mode display
   useEffect(() => {
