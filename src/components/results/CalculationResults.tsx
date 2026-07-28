@@ -529,6 +529,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
                     filterLowVolume={filterLowVolume}
                     filterVolatile={filterVolatile}
                     suspiciousPriceShards={suspiciousPriceShards}
+                    substitutedShards={result.substitutedShards}
                   />
                   )}
                 </>

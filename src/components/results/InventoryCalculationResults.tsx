@@ -226,6 +226,7 @@ export const InventoryCalculationResults: React.FC<InventoryCalculationResultsPr
                       filterLowVolume={filterLowVolume}
                       filterVolatile={filterVolatile}
                       suspiciousPriceShards={suspiciousPriceShards}
+                      substitutedShards={result.substitutedShards}
                     />
                   </>
                 )}

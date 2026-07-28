@@ -1,6 +1,6 @@
-import type { CalculationParams, CalculationResult, RecipeOverride, Data, InventoryCalculationResult } from "../types/types";
+import type { CalculationParams, CalculationResult, RecipeOverride, Data, InventoryCalculationResult, RecipeTree } from "../types/types";
 import { CalculationService, InvCalculationService } from "../services";
-import { applyStableFilter } from "../utilities/stableFilter";
+import { applyStableFilter, computeSubstitutions } from "../utilities/stableFilter";
 
 interface StartMsg {
   type: "start";
@@ -96,8 +96,20 @@ async function handleSingleCalculation(data: StartMsg) {
     const service = CalculationService.getInstance();
     let parsedData = await service.parseData(params);
 
-    if (excludedShardIds && excludedShardIds.length > 0) {
-      parsedData = applyStableFilter(parsedData, new Set(excludedShardIds), keepShardId);
+    const hasFilter = excludedShardIds && excludedShardIds.length > 0;
+    const excludedSet = hasFilter ? new Set(excludedShardIds) : undefined;
+    console.log("[Worker:Single] hasFilter:", hasFilter, "excludedCount:", excludedShardIds?.length ?? 0, "keepShardId:", keepShardId);
+
+    let originalTree = null;
+    if (hasFilter) {
+      const { choices: origChoices } = service.computeMinCosts(parsedData, params, recipeOverrides);
+      const origCycleNodes = params.crocodileLevel > 0 || recipeOverrides.length > 0 ? service.findCycleNodes(origChoices) : [];
+      originalTree = service.buildRecipeTree(parsedData, targetShard, origChoices, origCycleNodes, params, recipeOverrides);
+      console.log("[Worker:Single] originalTree:", originalTree ? `${originalTree.method}(${originalTree.shard})` : "null");
+    }
+
+    if (hasFilter) {
+      parsedData = applyStableFilter(parsedData, excludedSet!, keepShardId);
     }
 
     if (!parsedData.shards[targetShard]) {
@@ -109,6 +121,7 @@ async function handleSingleCalculation(data: StartMsg) {
         totalQuantities: new Map<string, number>(),
         craftTime: 0,
         tree: { shard: targetShard, method: "direct", quantity: 0 },
+        substitutedShards: hasFilter ? computeSubstitutions(originalTree, { shard: targetShard, method: "direct", quantity: 0 }, excludedSet!) : undefined,
       };
       post({ type: "result", result: emptyResult, parsedData });
       return;
@@ -144,6 +157,11 @@ async function handleSingleCalculation(data: StartMsg) {
     const totalTime = service.calculateTotalTimeFromQuantities(totalQuantities, craftTime, parsedData, params);
     const timePerShard = totalTime / totalShardsProduced;
 
+    const substitutedShards = hasFilter ? computeSubstitutions(originalTree, tree, excludedSet!) : undefined;
+    if (hasFilter) {
+      console.log("[Worker:Single] computeSubstitutions result:", substitutedShards?.size ?? 0, "entries", substitutedShards ? Object.fromEntries(substitutedShards) : "undefined");
+    }
+
     const result: CalculationResult = {
       timePerShard,
       totalTime,
@@ -152,12 +170,13 @@ async function handleSingleCalculation(data: StartMsg) {
       totalQuantities,
       craftTime,
       tree,
+      substitutedShards,
     };
 
     post({ type: "progress", phase: "finalizing", progress: 1, message: "Done" });
     post({ type: "result", result, parsedData });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Calculation failed";
+    const message = err instanceof Error ? err.message : "Worker calculation failed";
     post({ type: "error", message });
   }
 }
@@ -169,8 +188,22 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
     const service = CalculationService.getInstance();
     let parsedData = await service.parseData(params);
 
-    if (excludedShardIds && excludedShardIds.length > 0) {
-      parsedData = applyStableFilter(parsedData, new Set(excludedShardIds));
+    const hasFilter = excludedShardIds && excludedShardIds.length > 0;
+    const excludedSet = hasFilter ? new Set(excludedShardIds) : undefined;
+    console.log("[Worker:Batch] hasFilter:", hasFilter, "excludedCount:", excludedShardIds?.length ?? 0);
+
+    let originalParsedData: typeof parsedData | null = null;
+    let originalChoices = null;
+    let originalCycleNodes: ReturnType<typeof service.findCycleNodes> = [];
+    if (hasFilter) {
+      originalParsedData = parsedData;
+      const origResult = service.computeMinCosts(parsedData, params, recipeOverrides);
+      originalChoices = origResult.choices;
+      originalCycleNodes = params.crocodileLevel > 0 || recipeOverrides.length > 0 ? service.findCycleNodes(originalChoices) : [];
+    }
+
+    if (hasFilter) {
+      parsedData = applyStableFilter(parsedData, excludedSet!);
     }
 
     const { choices: choicesMap, minCosts } = service.computeMinCosts(parsedData, params, recipeOverrides);
@@ -204,6 +237,11 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
         continue;
       }
 
+      let originalTree = null;
+      if (hasFilter && originalChoices && originalParsedData) {
+        originalTree = service.buildRecipeTree(originalParsedData, targetShard, originalChoices, originalCycleNodes, params, recipeOverrides);
+      }
+
       const tree = service.buildRecipeTree(parsedData, targetShard, choices, cycleNodes, params, recipeOverrides, minCostsCache);
 
       const craftCounter = { total: 0 };
@@ -233,6 +271,11 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
       const totalTime = service.calculateTotalTimeFromQuantities(totalQuantities, craftTime, parsedData, params);
       const timePerShard = totalTime / totalShardsProduced;
 
+      const substitutedShards = hasFilter ? computeSubstitutions(originalTree, tree, excludedSet!) : undefined;
+      if (hasFilter && substitutedShards && substitutedShards.size > 0) {
+        console.log("[Worker:Batch] substitutions for", targetShard, ":", Object.fromEntries(substitutedShards));
+      }
+
       const result: CalculationResult = {
         timePerShard,
         totalTime,
@@ -241,6 +284,7 @@ async function handleBatchCalculationWithData(data: BatchStartWithDataMsg) {
         totalQuantities,
         craftTime,
         tree,
+        substitutedShards,
       };
 
       results.push(result);
@@ -264,8 +308,19 @@ async function handleInventoryCalculation(data: InventoryCalculationMsg) {
     const invService = InvCalculationService.getInstance();
     let parsedData = await service.parseData(params);
 
-    if (excludedShardIds && excludedShardIds.length > 0) {
-      parsedData = applyStableFilter(parsedData, new Set(excludedShardIds), keepShardId);
+    const hasFilter = excludedShardIds && excludedShardIds.length > 0;
+    const excludedSet = hasFilter ? new Set(excludedShardIds) : undefined;
+    console.log("[Worker:Inventory] hasFilter:", hasFilter, "excludedCount:", excludedShardIds?.length ?? 0, "keepShardId:", keepShardId);
+
+    let originalTree = null;
+    if (hasFilter) {
+      const { choices: origChoices } = service.computeMinCosts(parsedData, params, recipeOverrides);
+      const origCycleNodes = params.crocodileLevel > 0 || recipeOverrides.length > 0 ? service.findCycleNodes(origChoices) : [];
+      originalTree = service.buildRecipeTree(parsedData, targetShard, origChoices, origCycleNodes, params, recipeOverrides);
+    }
+
+    if (hasFilter) {
+      parsedData = applyStableFilter(parsedData, excludedSet!, keepShardId);
     }
     const inventoryMap = new Map(Object.entries(inventory));
     const ownedAttributesMap = new Map(Object.entries(ownedAttributes));
@@ -279,6 +334,7 @@ async function handleInventoryCalculation(data: InventoryCalculationMsg) {
         totalQuantities: new Map<string, number>(),
         craftTime: 0,
         tree: { shard: targetShard, method: "direct", quantity: 0 },
+        substitutedShards: hasFilter ? computeSubstitutions(originalTree, { shard: targetShard, method: "direct", quantity: 0 }, excludedSet!) : undefined,
       };
       post({ type: "inventory-result", result: emptyResult, parsedData });
       return;
@@ -293,6 +349,11 @@ async function handleInventoryCalculation(data: InventoryCalculationMsg) {
       ownedAttributesMap,
       parsedData
     );
+
+    if (hasFilter) {
+      result.substitutedShards = computeSubstitutions(originalTree, result.tree as RecipeTree | null, excludedSet!);
+      console.log("[Worker:Inventory] substitutions:", result.substitutedShards?.size ?? 0, "entries");
+    }
 
     post({ type: "progress", phase: "finalizing", progress: 1, message: "Done" });
     post({ type: "inventory-result", result, parsedData });
