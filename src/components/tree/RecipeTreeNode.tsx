@@ -6,7 +6,7 @@ import { formatNumber } from "../../utilities";
 import type { RecipeTreeNodeProps, Recipe, Shard, RecipeTree } from "../../types/types";
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
-import { STABLE_MIN_DAILY_BUY_VOLUME } from "../../utilities/stableFilter";
+import { STABLE_MIN_DAILY_BUY_VOLUME, STABLE_MIN_DAILY_SELL_VOLUME } from "../../utilities/stableFilter";
 
 export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   tree,
@@ -80,7 +80,7 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
     // "Stable" = filtre volume : shards sous le seuil sont masquées
     if (filterLowVolume) {
       if (!priceInfo) return { filtered: true, reason: "no price" };
-      if (priceInfo.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME) {
+      if (priceInfo.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME || priceInfo.dailySellVolume < STABLE_MIN_DAILY_SELL_VOLUME) {
         return { filtered: true, reason: "volume" };
       }
     }
@@ -122,8 +122,8 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
             <span className={getRarityColor(shard.rarity)}>{shard.name}</span>
             {/* "Stable" warning: low volume */}
             {filterLowVolume && !ironManView && bazaarPrices?.[shard.id] && (
-              bazaarPrices[shard.id].dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME && (
-                <span title="Volume d'achat faible"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></span>
+              (bazaarPrices[shard.id].dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME || bazaarPrices[shard.id].dailySellVolume < STABLE_MIN_DAILY_SELL_VOLUME) && (
+                <span title="Volume faible (< 5k achat ou < 5k vente)"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></span>
               )
             )}
             {/* "Safe" warning: price anomaly */}

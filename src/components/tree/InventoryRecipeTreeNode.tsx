@@ -7,8 +7,7 @@ import type { InventoryRecipeTreeNodeProps, Recipe, Shard, InventoryRecipeTree }
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
 
-const MIN_BUY_VOLUME = 3000;
-const MIN_SELL_VOLUME = 1000;
+import { STABLE_MIN_DAILY_BUY_VOLUME as MIN_BUY_VOLUME, STABLE_MIN_DAILY_SELL_VOLUME as MIN_SELL_VOLUME } from "../../utilities/stableFilter";
 
 export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = ({
   tree,

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Clock, Coins, Hammer, Target, BarChart3, TicketPercent, Info } from "lucide-react";
 import { formatLargeNumber, formatNumber, formatTime } from "../../utilities";
 import type { RecipeTree, CalculationResultsProps } from "../../types/types";
@@ -8,8 +8,8 @@ import { SummaryCard, MaterialItem, useToast } from "../ui";
 import pako from "pako";
 import { CopyTreeModal } from "../modals";
 
-const MIN_SHARD_VOLUME = 5000;
 const MIN_BUY_VOLUME = 5000;
+const MIN_SELL_VOLUME = 5000;
 
 // Utility function to manage expanded states
 const useTreeExpansion = (tree: RecipeTree | null) => {
@@ -85,6 +85,27 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
   const { expandedStates, handleExpandAll, handleCollapseAll, handleNodeToggle } = useTreeExpansion(result.tree);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
   const { toast } = useToast();
+
+  const notifiedSubstitutionsRef = useRef<any>(null);
+  useEffect(() => {
+    if (
+      filterLowVolume &&
+      result &&
+      result !== notifiedSubstitutionsRef.current &&
+      result.substitutedShards &&
+      result.substitutedShards.size > 0
+    ) {
+      notifiedSubstitutionsRef.current = result;
+      result.substitutedShards.forEach((oldShardId, newShardId) => {
+        const oldShardName = data.shards[oldShardId]?.name || oldShardId;
+        const newShardName = data.shards[newShardId]?.name || newShardId;
+        toast({
+          title: `${oldShardName} -> ${newShardName}`,
+          variant: "info",
+        });
+      });
+    }
+  }, [result, filterLowVolume, data.shards, toast]);
 
   const gzipBase64 = (text: string) => {
     const gzipped = pako.gzip(text);
@@ -440,7 +461,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
               // "Stable" = filtre volume : dailyBuyVolume < 5000
               if (filterLowVolume) {
                 if (!priceInfo) return false;
-                if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME) return false;
+                if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME || priceInfo.dailySellVolume < MIN_SELL_VOLUME) return false;
               }
               // "Safe" = anomalie prix → ne filtre PAS (warning dans RecipeTreeNode)
               return true;

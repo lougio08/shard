@@ -1,9 +1,9 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { Clock, Coins, Hammer, Target, BarChart3, TicketPercent } from "lucide-react";
 import { formatLargeNumber, formatNumber, formatTime } from "../../utilities";
 import type { InventoryCalculationResult, Data, CalculationParams, RecipeOverride, PriceInfo } from "../../types/types";
 import { InventoryRecipeTreeNode } from "../tree";
-import { SummaryCard, MaterialItem } from "../ui";
+import { SummaryCard, MaterialItem, useToast } from "../ui";
 import { RecipeOverrideManager } from "../forms";
 import { ShardsUsed } from "./ShardsUsed";
 
@@ -52,9 +52,31 @@ export const InventoryCalculationResults: React.FC<InventoryCalculationResultsPr
   filterVolatile,
   suspiciousPriceShards,
 }) => {
+  const { toast } = useToast();
   const targetShardData = data.shards[targetShard];
   const targetShardRate = targetShardData?.rate ?? 0;
   const inventoryTree = result.tree;
+
+  const notifiedSubstitutionsRef = useRef<any>(null);
+  useEffect(() => {
+    if (
+      filterLowVolume &&
+      result &&
+      result !== notifiedSubstitutionsRef.current &&
+      result.substitutedShards &&
+      result.substitutedShards.size > 0
+    ) {
+      notifiedSubstitutionsRef.current = result;
+      result.substitutedShards.forEach((oldShardId, newShardId) => {
+        const oldShardName = data.shards[oldShardId]?.name || oldShardId;
+        const newShardName = data.shards[newShardId]?.name || newShardId;
+        toast({
+          title: `${oldShardName} -> ${newShardName}`,
+          variant: "info",
+        });
+      });
+    }
+  }, [result, filterLowVolume, data.shards, toast]);
 
   return (
     <div className="space-y-3">
