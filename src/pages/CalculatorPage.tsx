@@ -6,7 +6,7 @@ import { useCustomRates, useCalculatorState } from "../hooks";
 import { DataService } from "../services";
 import type { CalculationFormData } from "../schemas";
 import type { CalculationResult, CalculationParams, RecipeOverride, Data, InventoryCalculationResult, PriceInfo } from "../types/types";
-import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards, loadBazaarCache } from "../utilities";
+import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards, loadBazaarCache, saveBazaarCache } from "../utilities";
 import { getUnstableShardIds } from "../utilities/stableFilter";
 import { detectSuspiciousOrderBookPrices, detectPriceAnomaly, collectTreeShardIds } from "../utilities/profitUtils";
 import { calculateMultipleShardsParallel, calculateOptimalPathWithWorker, calculateInventoryWithWorker, type WorkerProgress } from "../services/workerCalculationService";
@@ -116,7 +116,14 @@ const performCalculation = async (
 
     let excludedShardIds: string[] | undefined;
     if (filterLowVolume) {
-      const cached = loadBazaarCache();
+      let cached = loadBazaarCache();
+      if (!cached) {
+        try {
+          const { prices } = await DataService.getInstance().fetchBazaarInfosWithOrders();
+          saveBazaarCache(prices);
+          cached = loadBazaarCache();
+        } catch { /* ignore fetch errors */ }
+      }
       if (cached) {
         const excluded = getUnstableShardIds(cached.prices);
         if (excluded.size > 0) excludedShardIds = [...excluded];
@@ -255,7 +262,14 @@ const performCalculation = async (
   let excludedShardIds: string[] | undefined;
   let keepShardId: string | undefined;
   if (filterLowVolume) {
-    const cached = loadBazaarCache();
+    let cached = loadBazaarCache();
+    if (!cached) {
+      try {
+        const { prices } = await DataService.getInstance().fetchBazaarInfosWithOrders();
+        saveBazaarCache(prices);
+        cached = loadBazaarCache();
+      } catch { /* ignore fetch errors */ }
+    }
     if (cached) {
       const excluded = getUnstableShardIds(cached.prices);
       if (excluded.size > 0) {
@@ -263,6 +277,7 @@ const performCalculation = async (
         keepShardId = shardKey;
       }
     }
+    console.log("[CalcPage] filterLowVolume:", filterLowVolume, "cached:", !!cached, "excludedCount:", excludedShardIds?.length ?? 0, "keepShardId:", keepShardId);
   }
 
   const { promise, cancel: workerCancel } = calculateOptimalPathWithWorker(
@@ -366,7 +381,8 @@ const CalculatorPageContent: React.FC = () => {
                 setCalculationData,
                 setCalculating: setIsCalculating,
                 setProgress,
-              }
+              },
+              filterLowVolume
             );
           };
           submit(updatedForm).catch(console.error);
@@ -375,7 +391,7 @@ const CalculatorPageContent: React.FC = () => {
     } catch (error) {
       console.error("Failed to load shard from key:", error);
     }
-  }, [form, setForm, setTargetShardName, customRates, recipeOverrides, ownedAttributes]);
+  }, [form, setForm, setTargetShardName, customRates, recipeOverrides, ownedAttributes, filterLowVolume]);
 
   // Handler for importing shard levels from profile
   const handleShardLevelsImport = useCallback((levels: {
@@ -410,6 +426,7 @@ const CalculatorPageContent: React.FC = () => {
     if (calculationData) {
       DataService.getInstance().fetchBazaarInfosWithOrders().then(({ prices, orderBooks }) => {
         setBazaarPrices(prices);
+        saveBazaarCache(prices);
         const suspicious = detectSuspiciousOrderBookPrices(orderBooks);
         setSuspiciousPriceShards(suspicious);
       }).catch(() => {});
@@ -417,6 +434,16 @@ const CalculatorPageContent: React.FC = () => {
       setBazaarPrices(null);
     }
   }, [calculationData, form.ironManView]);
+
+  // Fetch bazaar data on mount so stable filter works on first calculation
+  useEffect(() => {
+    DataService.getInstance().fetchBazaarInfosWithOrders().then(({ prices, orderBooks }) => {
+      setBazaarPrices(prices);
+      saveBazaarCache(prices);
+      const suspicious = detectSuspiciousOrderBookPrices(orderBooks);
+      setSuspiciousPriceShards(suspicious);
+    }).catch(() => {});
+  }, []);
 
   // Fetch price history for "Safe" anomaly detection
   useEffect(() => {
@@ -561,7 +588,14 @@ const CalculatorPageContent: React.FC = () => {
       let excludedShardIds: string[] | undefined;
       let keepShardId: string | undefined;
       if (filterLowVolume) {
-        const cached = loadBazaarCache();
+        let cached = loadBazaarCache();
+        if (!cached) {
+          try {
+            const { prices } = await DataService.getInstance().fetchBazaarInfosWithOrders();
+            saveBazaarCache(prices);
+            cached = loadBazaarCache();
+          } catch { /* ignore fetch errors */ }
+        }
         if (cached) {
           const excluded = getUnstableShardIds(cached.prices);
           if (excluded.size > 0) {

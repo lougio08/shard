@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ShardAutocomplete, RecipeCountBadge, SearchFilterInput, ShardDisplay, DropdownButton } from "../components";
 import { getRarityColor, formatLargeNumber, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData } from "../utilities";
-import { applyStableFilter, getUnstableShardIds } from "../utilities/stableFilter";
+import { applyStableFilter, getUnstableShardIds, isLowSellVolume } from "../utilities/stableFilter";
 import { useFusionData, useDropdownManager, useRecipeState } from "../hooks";
 import { processOutputRecipes, categorizeAndGroupRecipes, filterCategorizedRecipes, type Recipe, type CategorizedRecipes, type GroupedRecipe, type FusionData } from "../utilities";
 import { DataService } from "../services/dataService";
@@ -107,6 +107,7 @@ export const RecipePage = () => {
       if (!priceInfo) continue;
       const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
       if (effectiveSellRevenue <= 0) continue;
+      if (filterLowVolume && isLowSellVolume(priceInfo)) continue;
 
       const choice = choices.get(outputShardId);
       if (!choice || choice.recipe === null) continue;
@@ -231,6 +232,7 @@ export const RecipePage = () => {
         if (!priceInfo) continue;
         const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
         if (effectiveSellRevenue <= 0) continue;
+        if (filterLowVolume && isLowSellVolume(priceInfo)) continue;
 
         const choice = choices.get(outputShardId);
         if (!choice || choice.recipe === null) continue;

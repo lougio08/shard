@@ -100,6 +100,7 @@ export interface CalculationResult {
   craftTime: number;
   tree: RecipeTree | null;
   materialBreakdown?: Map<string, Map<string, number>>;
+  substitutedShards?: Map<string, string>;
 }
 
 export interface ShardWithKey extends Shard {
@@ -183,6 +184,7 @@ export interface RecipeTreeNodeProps {
   filterLowVolume?: boolean;
   filterVolatile?: boolean;
   suspiciousPriceShards?: Set<string>;
+  substitutedShards?: Map<string, string>;
 }
 
 export interface InventoryRecipeTreeNodeProps {
@@ -202,6 +204,7 @@ export interface InventoryRecipeTreeNodeProps {
   filterLowVolume?: boolean;
   filterVolatile?: boolean;
   suspiciousPriceShards?: Set<string>;
+  substitutedShards?: Map<string, string>;
 }
 
 // searchbar
@@ -272,6 +275,7 @@ export interface InventoryCalculationResult {
   craftTime: number;
   tree: InventoryRecipeTree | null;
   remainingInventory?: Map<string, number>;
+  substitutedShards?: Map<string, string>;
 }
 
 export type InventoryRecipeTree =

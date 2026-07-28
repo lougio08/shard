@@ -1,9 +1,9 @@
 import React from "react";
 import { getRarityColor, formatShardDescription, formatLargeNumber } from "../../utilities";
 import { GeckoIcon } from "../ui/GeckoIcon";
-import { ChevronDown, ChevronRight, Settings, Package, MoveRight, ShieldX } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings, Package, MoveRight, ShieldX, ArrowLeftRight } from "lucide-react";
 import { formatNumber } from "../../utilities";
-import type { InventoryRecipeTreeNodeProps, Recipe, Shard, InventoryRecipeTree, PriceInfo } from "../../types/types";
+import type { InventoryRecipeTreeNodeProps, Recipe, Shard, InventoryRecipeTree } from "../../types/types";
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
 
@@ -27,6 +27,7 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
   filterLowVolume,
   filterVolatile,
   suspiciousPriceShards,
+  substitutedShards,
 }) => {
   // Helper function to get expansion state
   const pendingDefaults = React.useRef<Map<string, boolean>>(new Map());
@@ -74,6 +75,7 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
             filterLowVolume={filterLowVolume}
             filterVolatile={filterVolatile}
             suspiciousPriceShards={suspiciousPriceShards}
+            substitutedShards={substitutedShards}
           />
         ))}
       </>
@@ -134,6 +136,13 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
     return { filtered: false, reason: "" };
   };
 
+  const getSubstitutionInfo = (shardId: string): { originalShardId: string; originalShard: Shard | undefined } | null => {
+    if (!substitutedShards) return null;
+    const originalId = substitutedShards.get(shardId);
+    if (!originalId) return null;
+    return { originalShardId: originalId, originalShard: data.shards[originalId] };
+  };
+
   const renderChevron = (isExpanded: boolean) => (isExpanded ? <ChevronDown className="w-4 h-4 text-amber-400" /> : <ChevronRight className="w-4 h-4 text-amber-400" />);
 
   const renderRecipeDisplay = (
@@ -149,6 +158,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
     const outputShardDesc = SHARD_DESCRIPTIONS[outputShard.id as keyof typeof SHARD_DESCRIPTIONS];
     const input1ShardDesc = SHARD_DESCRIPTIONS[input1Shard.id as keyof typeof SHARD_DESCRIPTIONS];
     const input2ShardDesc = SHARD_DESCRIPTIONS[input2Shard.id as keyof typeof SHARD_DESCRIPTIONS];
+    const input1Substituted = substitutedShards?.has(input1Shard.id);
+    const input2Substituted = substitutedShards?.has(input2Shard.id);
 
     return (
       <div className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
@@ -187,8 +198,9 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
           className="cursor-pointer"
         >
           <div className="flex items-center gap-2">
-            <img src={`${import.meta.env.BASE_URL}shardIcons/${input1Shard.id}.png`} alt={input1Shard.name} className="w-5 h-5 object-contain flex-shrink-0" loading="lazy" />
-            <span className={getRarityColor(input1Shard.rarity)}>{input1Shard.name}</span>
+            <img src={`${import.meta.env.BASE_URL}shardIcons/${input1Shard.id}.png`} alt={input1Shard.name} className={`w-5 h-5 object-contain flex-shrink-0 ${input1Substituted ? "ring-1 ring-purple-400/60 rounded" : ""}`} loading="lazy" />
+            <span className={input1Substituted ? "text-purple-300 font-medium" : getRarityColor(input1Shard.rarity)}>{input1Shard.name}</span>
+            {input1Substituted && <ArrowLeftRight className="w-3 h-3 text-purple-400 flex-shrink-0" />}
           </div>
         </Tooltip>
 
@@ -207,8 +219,9 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
           className="cursor-pointer"
         >
           <div className="flex items-center gap-2">
-            <img src={`${import.meta.env.BASE_URL}shardIcons/${input2Shard.id}.png`} alt={input2Shard.name} className="w-5 h-5 object-contain flex-shrink-0" loading="lazy" />
-            <span className={getRarityColor(input2Shard.rarity)}>{input2Shard.name}</span>
+            <img src={`${import.meta.env.BASE_URL}shardIcons/${input2Shard.id}.png`} alt={input2Shard.name} className={`w-5 h-5 object-contain flex-shrink-0 ${input2Substituted ? "ring-1 ring-purple-400/60 rounded" : ""}`} loading="lazy" />
+            <span className={input2Substituted ? "text-purple-300 font-medium" : getRarityColor(input2Shard.rarity)}>{input2Shard.name}</span>
+            {input2Substituted && <ArrowLeftRight className="w-3 h-3 text-purple-400 flex-shrink-0" />}
           </div>
         </Tooltip>
       </div>
@@ -218,16 +231,24 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
   const renderDirectShard = (quantity: number, shard: Shard, inCycle = false) => {
     const { filtered, reason } = isShardFiltered(shard.id);
     const isFiltered = filtered && !ironManView;
+    const substitution = getSubstitutionInfo(shard.id);
+    const isSubstituted = !!substitution;
     return (
-      <div className={`flex items-center justify-between pl-3.5 pr-1 py-1 ${inCycle ? 'bg-slate-900' : 'bg-slate-800'} rounded-md border ${isFiltered ? "border-red-700/50 opacity-60" : "border-slate-600"}`}>
+      <div className={`flex items-center justify-between pl-3.5 pr-1 py-1 ${inCycle ? 'bg-slate-900' : 'bg-slate-800'} rounded-md border ${isSubstituted ? "border-purple-500/50" : isFiltered ? "border-red-700/50 opacity-60" : "border-slate-600"}`}>
         <div className="flex items-center space-x-2 p-0.5 text-sm">
-          <div className={`w-2 h-2 rounded-full mr-2.5 ${isFiltered ? "bg-red-400" : "bg-green-400"}`} />
-          {isFiltered && <ShieldX className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
+          <div className={`w-2 h-2 rounded-full mr-2.5 ${isSubstituted ? "bg-purple-400" : isFiltered ? "bg-red-400" : "bg-green-400"}`} />
+          {isFiltered && !isSubstituted && <ShieldX className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />}
           {renderShardInfo(quantity, shard, false)}
-          <span className={`px-1 py-0.4 text-xs border rounded-md flex-shrink-0 ${isFiltered ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-green-500/20 text-green-400 border-green-500/30"}`}>{ironManView ? "Direct" : "Bazaar"}</span>
-          {isFiltered && (
+          <span className={`px-1 py-0.4 text-xs border rounded-md flex-shrink-0 ${isSubstituted ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : isFiltered ? "bg-red-500/20 text-red-400 border-red-500/30" : "bg-green-500/20 text-green-400 border-green-500/30"}`}>{ironManView ? "Direct" : "Bazaar"}</span>
+          {isFiltered && !isSubstituted && (
             <span className="text-[10px] text-red-400 whitespace-nowrap">
               {reason === "no price" ? "No price" : reason === "suspicious" ? "Suspicious price" : "Low volume"}
+            </span>
+          )}
+          {substitution && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded whitespace-nowrap">
+              <ArrowLeftRight className="w-3 h-3" />
+              Replaced
             </span>
           )}
         </div>
@@ -332,6 +353,7 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterLowVolume={filterLowVolume}
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
+              substitutedShards={substitutedShards}
             />
             <InventoryRecipeTreeNode
               tree={recipeTree.inputs[1]}
@@ -348,6 +370,7 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterLowVolume={filterLowVolume}
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
+              substitutedShards={substitutedShards}
             />
           </div>
         )}
@@ -420,12 +443,20 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
 
   // Handle direct method
   if (tree.method === "direct") {
+    const substitution = getSubstitutionInfo(tree.shard);
+    const isSubstituted = !!substitution;
     return (
-      <div className={`flex items-center justify-between pl-3.5 pr-1 py-1 ${isInCycle ? 'bg-slate-900' : 'bg-slate-800'} rounded-md border border-slate-600`}>
+      <div className={`flex items-center justify-between pl-3.5 pr-1 py-1 ${isInCycle ? 'bg-slate-900' : 'bg-slate-800'} rounded-md border ${isSubstituted ? "border-purple-500/50" : "border-slate-600"}`}>
         <div className="flex items-center space-x-2 p-0.5 text-sm">
-          <div className="w-2 h-2 bg-green-400 rounded-full mr-2.5" />
+          <div className={`w-2 h-2 rounded-full mr-2.5 ${isSubstituted ? "bg-purple-400" : "bg-green-400"}`} />
           {renderShardInfo(tree.quantity, shard, false)}
-          <span className="px-1 py-0.4 text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded-md flex-shrink-0">{ironManView ? "Direct" : "Bazaar"}</span>
+          <span className={`px-1 py-0.4 text-xs border rounded-md flex-shrink-0 ${isSubstituted ? "bg-purple-500/20 text-purple-300 border-purple-500/30" : "bg-green-500/20 text-green-400 border-green-500/30"}`}>{ironManView ? "Direct" : "Bazaar"}</span>
+          {substitution && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded whitespace-nowrap">
+              <ArrowLeftRight className="w-3 h-3" />
+              Replaced
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <div className="text-right">
@@ -551,12 +582,13 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
                       <img
                         src={`${import.meta.env.BASE_URL}shardIcons/${input1Shard.id}.png`}
                         alt={input1Shard.name}
-                        className="w-5 h-5 object-contain inline-block align-middle flex-shrink-0"
+                        className={`w-5 h-5 object-contain inline-block align-middle flex-shrink-0 ${substitutedShards?.has(input1Shard.id) ? "ring-1 ring-purple-400/60 rounded" : ""}`}
                         loading="lazy"
                       />
-                      <span className={getRarityColor(input1Shard.rarity) + " whitespace-nowrap truncate"} style={{ maxWidth: "8rem" }}>
+                      <span className={(substitutedShards?.has(input1Shard.id) ? "text-purple-300 font-medium" : getRarityColor(input1Shard.rarity)) + " whitespace-nowrap truncate"} style={{ maxWidth: "8rem" }}>
                         {input1Shard.name}
                       </span>
+                      {substitutedShards?.has(input1Shard.id) && <ArrowLeftRight className="w-3 h-3 text-purple-400 flex-shrink-0" />}
                     </div>
                   </Tooltip>
 
@@ -578,12 +610,13 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
                       <img
                         src={`${import.meta.env.BASE_URL}shardIcons/${input2Shard.id}.png`}
                         alt={input2Shard.name}
-                        className="w-5 h-5 object-contain inline-block align-middle flex-shrink-0"
+                        className={`w-5 h-5 object-contain inline-block align-middle flex-shrink-0 ${substitutedShards?.has(input2Shard.id) ? "ring-1 ring-purple-400/60 rounded" : ""}`}
                         loading="lazy"
                       />
-                      <span className={getRarityColor(input2Shard.rarity) + " whitespace-nowrap truncate"} style={{ maxWidth: "8rem" }}>
+                      <span className={(substitutedShards?.has(input2Shard.id) ? "text-purple-300 font-medium" : getRarityColor(input2Shard.rarity)) + " whitespace-nowrap truncate"} style={{ maxWidth: "8rem" }}>
                         {input2Shard.name}
                       </span>
+                      {substitutedShards?.has(input2Shard.id) && <ArrowLeftRight className="w-3 h-3 text-purple-400 flex-shrink-0" />}
                     </div>
                   </Tooltip>
                 </span>
@@ -647,6 +680,7 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterLowVolume={filterLowVolume}
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
+              substitutedShards={substitutedShards}
             />
             <InventoryRecipeTreeNode
               tree={input2}
@@ -663,6 +697,7 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterLowVolume={filterLowVolume}
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
+              substitutedShards={substitutedShards}
             />
           </div>
         )}

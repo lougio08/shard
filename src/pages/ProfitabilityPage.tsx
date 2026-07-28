@@ -2,13 +2,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, TrendingDown, BarChart3, RefreshCw, AlertCircle, Info, ShieldCheck, ShieldX, AlertTriangle, Hammer, Clock } from "lucide-react";
 import { useFusionData } from "../hooks";
 import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectPriceAnomaly, collectTreeShardIds } from "../utilities";
-import { applyStableFilter, getUnstableShardIds, STABLE_MIN_DAILY_BUY_VOLUME } from "../utilities/stableFilter";
+import { applyStableFilter, getUnstableShardIds, STABLE_MIN_DAILY_BUY_VOLUME, isLowSellVolume, MIN_SELL_VOLUME } from "../utilities/stableFilter";
 import { DataService } from "../services/dataService";
 import { CalculationService } from "../services/calculationService";
 import { RecipeTreeNode } from "../components/tree";
 import type { RecipeTree, PriceInfo, Data, RecipeChoice } from "../types/types";
-
-const MIN_SELL_VOLUME = 1000;
 
 interface ProfitEntry {
   shardId: string;
@@ -248,6 +246,7 @@ export const ProfitabilityPage = () => {
         for (const [shardId, shard] of Object.entries(shardData)) {
           const priceInfo = currentPrices[shardId];
           if (!priceInfo) continue;
+          if (filterLowVolume && isLowSellVolume(priceInfo)) continue;
 
           let effectiveTree: RecipeTree | null = null;
           let entryCraftsNeeded = 0;
