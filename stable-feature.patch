@@ -1,0 +1,1305 @@
+From dc9ecfc58ea65961373229ef23cad0787cf04954 Mon Sep 17 00:00:00 2001
+From: Claude <assistant@example.com>
+Date: Sat, 25 Jul 2026 15:11:21 +0000
+Subject: [PATCH] feat: option Stable avec substitution automatique
+ (Calculator, Recipes, Profitability)
+
+- Nouveau src/utilities/stableFilter.ts : applyStableFilter() retire du graphe
+  de recettes les shards composantes dont le volume d'achat quotidien est
+  inferieur a 5000 unites (STABLE_MIN_DAILY_BUY_VOLUME), avant le calcul de
+  computeMinCosts, pour que l'algorithme choisisse automatiquement la
+  meilleure recette restante (substitution) au lieu de filtrer apres coup.
+
+- dataService.ts : ajout d'un cache en memoire (5 min) sur les snapshots
+  bazaar + loadDailyBuyVolumes(), pour eviter de refetcher ~189 shards a
+  chaque calcul.
+
+- workerCalculationService.ts : les 3 fonctions de calcul (single shard,
+  batch, inventaire) acceptent un parametre stableFilter optionnel, applique
+  juste apres parseData() et avant l'envoi au Worker / computeMinCosts.
+
+- CalculatorPage.tsx : nouveau toggle 'Stable' (n'existait pas), persistant
+  en localStorage, branche sur les 3 chemins de calcul (single, materials-
+  only/batch, inventaire).
+
+- RecipePage.tsx : logique dupliquee entre calculateProfitFull et
+  recalcProfitFromCache factorisee dans findBestProfitForShard(), qui
+  applique applyStableFilter avant computeMinCosts. Labels des boutons
+  harmonises (Stable = volume, Safe = volatilite).
+
+- ProfitabilityPage.tsx : meme principe, le filtre Stable est applique
+  avant computeMinCosts dans le calcul 'lourd' plutot qu'en post-filtrage
+  des resultats. Labels harmonises avec les 2 autres pages.
+
+- package.json/package-lock.json : ajout de @types/node (necessaire pour
+  que 'tsc -b' compile vite.config.ts sans erreur, probleme preexistant
+  sans lien avec cette fonctionnalite).
+---
+ package-lock.json                        |  81 ++---
+ package.json                             |   1 +
+ src/pages/CalculatorPage.tsx             |  64 +++-
+ src/pages/ProfitabilityPage.tsx          |  39 ++-
+ src/pages/RecipePage.tsx                 | 366 +++++++++--------------
+ src/services/dataService.ts              |  38 ++-
+ src/services/workerCalculationService.ts |  40 ++-
+ src/utilities/index.ts                   |   1 +
+ src/utilities/stableFilter.ts            |  84 ++++++
+ 9 files changed, 382 insertions(+), 332 deletions(-)
+ create mode 100644 src/utilities/stableFilter.ts
+
+diff --git a/package-lock.json b/package-lock.json
+index 479a8fe..0e388e4 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -21,6 +21,7 @@
+       },
+       "devDependencies": {
+         "@eslint/js": "^9.33.0",
++        "@types/node": "^26.1.1",
+         "@types/react": "^19.1.10",
+         "@types/react-dom": "^19.1.7",
+         "@vitejs/plugin-react": "^4.7.0",
+@@ -1144,9 +1145,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1160,9 +1158,6 @@
+       "cpu": [
+         "arm"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1176,9 +1171,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1192,9 +1184,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1208,9 +1197,6 @@
+       "cpu": [
+         "loong64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1224,9 +1210,6 @@
+       "cpu": [
+         "loong64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1240,9 +1223,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1256,9 +1236,6 @@
+       "cpu": [
+         "ppc64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1272,9 +1249,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1288,9 +1262,6 @@
+       "cpu": [
+         "riscv64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1304,9 +1275,6 @@
+       "cpu": [
+         "s390x"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1320,9 +1288,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1336,9 +1301,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1548,9 +1510,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1567,9 +1526,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1586,9 +1542,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1605,9 +1558,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MIT",
+       "optional": true,
+       "os": [
+@@ -1792,6 +1742,16 @@
+       "integrity": "sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==",
+       "license": "MIT"
+     },
++    "node_modules/@types/node": {
++      "version": "26.1.1",
++      "resolved": "https://registry.npmjs.org/@types/node/-/node-26.1.1.tgz",
++      "integrity": "sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==",
++      "devOptional": true,
++      "license": "MIT",
++      "dependencies": {
++        "undici-types": "~8.3.0"
++      }
++    },
+     "node_modules/@types/pako": {
+       "version": "2.0.4",
+       "resolved": "https://registry.npmjs.org/@types/pako/-/pako-2.0.4.tgz",
+@@ -3642,9 +3602,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -3665,9 +3622,6 @@
+       "cpu": [
+         "arm64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -3688,9 +3642,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "glibc"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -3711,9 +3662,6 @@
+       "cpu": [
+         "x64"
+       ],
+-      "libc": [
+-        "musl"
+-      ],
+       "license": "MPL-2.0",
+       "optional": true,
+       "os": [
+@@ -5744,6 +5692,13 @@
+         "typescript": ">=4.8.4 <6.1.0"
+       }
+     },
++    "node_modules/undici-types": {
++      "version": "8.3.0",
++      "resolved": "https://registry.npmjs.org/undici-types/-/undici-types-8.3.0.tgz",
++      "integrity": "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==",
++      "devOptional": true,
++      "license": "MIT"
++    },
+     "node_modules/unified": {
+       "version": "11.0.5",
+       "resolved": "https://registry.npmjs.org/unified/-/unified-11.0.5.tgz",
+diff --git a/package.json b/package.json
+index 6e5b55f..5e228b5 100644
+--- a/package.json
++++ b/package.json
+@@ -30,6 +30,7 @@
+   },
+   "devDependencies": {
+     "@eslint/js": "^9.33.0",
++    "@types/node": "^26.1.1",
+     "@types/react": "^19.1.10",
+     "@types/react-dom": "^19.1.7",
+     "@vitejs/plugin-react": "^4.7.0",
+diff --git a/src/pages/CalculatorPage.tsx b/src/pages/CalculatorPage.tsx
+index 3f7e9fd..63a232a 100644
+--- a/src/pages/CalculatorPage.tsx
++++ b/src/pages/CalculatorPage.tsx
+@@ -1,16 +1,17 @@
+ import React, { useState, useEffect, useCallback, useRef } from "react";
+-import { Menu, X, ChevronDown, ChevronRight, Package } from "lucide-react";
++import { Menu, X, ChevronDown, ChevronRight, Package, ShieldCheck } from "lucide-react";
+ import { CalculatorForm, CalculationResults, InventoryCalculationResults } from "../components";
+ import { WelcomeProfileModal, InventoryManagementModal } from "../components";
+ import { useCustomRates, useCalculatorState } from "../hooks";
+ import { DataService, CalculationService } from "../services";
+ import type { CalculationFormData } from "../schemas";
+ import type { CalculationResult, CalculationParams, RecipeOverride, Data, InventoryCalculationResult } from "../types/types";
+-import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards } from "../utilities";
+-import { calculateMultipleShardsParallel, calculateOptimalPathWithWorker, calculateInventoryWithWorker, type WorkerProgress } from "../services/workerCalculationService";
++import { isFirstVisit, setSaveEnabled, loadInventory, saveInventory, loadOwnedAttributes, saveOwnedAttributes, loadDisabledShards, saveDisabledShards, getUnstableShardIds } from "../utilities";
++import { calculateMultipleShardsParallel, calculateOptimalPathWithWorker, calculateInventoryWithWorker, type WorkerProgress, type StableFilterOptions } from "../services/workerCalculationService";
+ import { MAX_QUANTITIES } from "../constants";
+ 
+ const INVENTORY_ENABLED_KEY = "skyshards_use_inventory";
++const STABLE_MODE_KEY = "skyshards_stable_mode";
+ 
+ const CalculatorFormWithContext: React.FC<{
+   onSubmit: (data: CalculationFormData, setForm: (data: CalculationFormData) => void) => void;
+@@ -37,6 +38,7 @@ const performCalculation = async (
+   formData: CalculationFormData,
+   customRates: { [shardId: string]: number | undefined },
+   recipeOverrides: RecipeOverride[] = [],
++  stableMode: boolean,
+   callbacks: {
+     setTargetShardName: (name: string) => void;
+     setCurrentShardKey: (key: string) => void;
+@@ -117,11 +119,16 @@ const performCalculation = async (
+       quantity: shardQuantitiesMap.get(shardKey) || 1
+     }));
+ 
++    const stableFilter: StableFilterOptions | undefined = stableMode
++      ? { excludedShardIds: getUnstableShardIds(await dataService.loadDailyBuyVolumes()) }
++      : undefined;
++
+     const { promise, cancel: workerCancel } = calculateMultipleShardsParallel(
+       targets,
+       params,
+       recipeOverrides,
+-      (p) => !checkCancelled() && callbacks.setProgress(p)
++      (p) => !checkCancelled() && callbacks.setProgress(p),
++      stableFilter
+     );
+ 
+     promise
+@@ -234,12 +241,17 @@ const performCalculation = async (
+   callbacks.setCalculating(true);
+   callbacks.setProgress({ phase: "parsing", progress: 0, message: "Starting..." });
+ 
++  const stableFilter: StableFilterOptions | undefined = stableMode
++    ? { excludedShardIds: getUnstableShardIds(await dataService.loadDailyBuyVolumes()), keepShardId: shardKey }
++    : undefined;
++
+   const { promise, cancel: workerCancel } = calculateOptimalPathWithWorker(
+     shardKey,
+     formData.quantity,
+     params,
+     recipeOverrides,
+-    (p) => !checkCancelled() && callbacks.setProgress(p)
++    (p) => !checkCancelled() && callbacks.setProgress(p),
++    stableFilter
+   );
+ 
+   promise
+@@ -284,6 +296,18 @@ const CalculatorPageContent: React.FC = () => {
+     return stored === "true";
+   });
+ 
++  // "Stable" mode: exclut du calcul les shards composantes à faible volume d'achat
++  // quotidien et les remplace automatiquement par la meilleure alternative disponible.
++  const [stableMode, setStableMode] = useState<boolean>(() => {
++    const stored = localStorage.getItem(STABLE_MODE_KEY);
++    return stored === "true";
++  });
++  useEffect(() => {
++    try {
++      localStorage.setItem(STABLE_MODE_KEY, stableMode ? "true" : "false");
++    } catch { /* ignore */ }
++  }, [stableMode]);
++
+   const [inventory, setInventory] = useState<Map<string, number>>(loadInventory);
+   const [ownedAttributes, setOwnedAttributes] = useState<Map<string, number>>(loadOwnedAttributes);
+   const [disabledShards, setDisabledShards] = useState<Set<string>>(loadDisabledShards);
+@@ -320,6 +344,7 @@ const CalculatorPageContent: React.FC = () => {
+               formData,
+               customRates,
+               recipeOverrides,
++              stableMode,
+               {
+                 setTargetShardName,
+                 setCurrentShardKey,
+@@ -338,7 +363,7 @@ const CalculatorPageContent: React.FC = () => {
+     } catch (error) {
+       console.error("Failed to load shard from key:", error);
+     }
+-  }, [form, setForm, setTargetShardName, customRates, recipeOverrides, ownedAttributes]);
++  }, [form, setForm, setTargetShardName, customRates, recipeOverrides, ownedAttributes, stableMode]);
+ 
+   // Handler for importing shard levels from profile
+   const handleShardLevelsImport = useCallback((levels: {
+@@ -469,6 +494,9 @@ const CalculatorPageContent: React.FC = () => {
+ 
+     try {
+       const filteredInventory = new Map([...inventory].filter(([id]) => !disabledShards.has(id)));
++      const stableFilter: StableFilterOptions | undefined = stableMode
++        ? { excludedShardIds: getUnstableShardIds(await dataService.loadDailyBuyVolumes()), keepShardId: shardKey }
++        : undefined;
+       const { promise } = calculateInventoryWithWorker(
+         shardKey,
+         formData.quantity,
+@@ -476,6 +504,8 @@ const CalculatorPageContent: React.FC = () => {
+         recipeOverrides,
+         filteredInventory,
+         ownedAttributes,
++        undefined,
++        stableFilter,
+       );
+       const { result: calculationResult, parsedData } = await promise;
+ 
+@@ -488,7 +518,7 @@ const CalculatorPageContent: React.FC = () => {
+     } finally {
+       setIsCalculating(false);
+     }
+-  }, [customRates, inventory, disabledShards, recipeOverrides]);
++  }, [customRates, inventory, disabledShards, recipeOverrides, stableMode]);
+ 
+   // ─── Standard debounced calculation ───
+   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+@@ -531,7 +561,7 @@ const CalculatorPageContent: React.FC = () => {
+           };
+ 
+           try {
+-            cancelRef.current = await performCalculation(formData, customRates, recipeOverrides, callbacks);
++            cancelRef.current = await performCalculation(formData, customRates, recipeOverrides, stableMode, callbacks);
+           } catch (err) {
+             if (err instanceof Error && !err.message.includes("not found")) {
+               console.error("Calculation failed:", err);
+@@ -540,7 +570,7 @@ const CalculatorPageContent: React.FC = () => {
+         }
+       }, delay);
+     },
+-    [customRates, recipeOverrides, useInventory, performInventoryCalculation, setTargetShardName, setCurrentShardKey, setCurrentQuantity, setCurrentParams, setResult, setCalculationData]
++    [customRates, recipeOverrides, useInventory, stableMode, performInventoryCalculation, setTargetShardName, setCurrentShardKey, setCurrentQuantity, setCurrentParams, setResult, setCalculationData]
+   );
+ 
+   const formRef = useRef(form);
+@@ -584,7 +614,7 @@ const CalculatorPageContent: React.FC = () => {
+       debouncedCalculate(currentForm, 150).catch(console.error);
+     }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [customRates, recipeOverrides, inventory, useInventory, debouncedCalculate]);
++  }, [customRates, recipeOverrides, inventory, useInventory, stableMode, debouncedCalculate]);
+ 
+   // Initialize params from form for inventory mode display
+   useEffect(() => {
+@@ -708,6 +738,20 @@ const CalculatorPageContent: React.FC = () => {
+                   )}
+                 </div>
+ 
++              {/* Stable toggle */}
++              <button
++                onClick={() => setStableMode((s) => !s)}
++                className={`w-full px-3 py-2.5 rounded-md border text-sm font-medium transition-colors duration-200 cursor-pointer flex items-center justify-center gap-2 ${
++                  stableMode
++                    ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/30"
++                    : "bg-white/5 border-white/10 text-slate-400 hover:text-slate-300 hover:border-white/20"
++                }`}
++                title="Exclut du calcul les shards composantes dont le volume d'achat quotidien est trop faible et les remplace automatiquement par la meilleure alternative disponible"
++              >
++                <ShieldCheck className="w-4 h-4" />
++                <span>Stable {stableMode ? "activé" : "désactivé"}</span>
++              </button>
++
+               {/* Calculator Settings Form */}
+               <CalculatorFormWithContext
+                 onSubmit={handleCalculate}
+diff --git a/src/pages/ProfitabilityPage.tsx b/src/pages/ProfitabilityPage.tsx
+index 258c9c0..dfa979f 100644
+--- a/src/pages/ProfitabilityPage.tsx
++++ b/src/pages/ProfitabilityPage.tsx
+@@ -1,14 +1,12 @@
+ import { useState, useEffect, useCallback, useRef } from "react";
+ import { TrendingUp, TrendingDown, BarChart3, RefreshCw, AlertCircle, Info, ShieldCheck, ShieldX, AlertTriangle, Hammer, Clock } from "lucide-react";
+ import { useFusionData } from "../hooks";
+-import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, getTreeBuyNodes, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectVolatileShards } from "../utilities";
++import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, getTreeBuyNodes, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectVolatileShards, applyStableFilter, getUnstableShardIds, STABLE_MIN_DAILY_BUY_VOLUME } from "../utilities";
+ import { DataService } from "../services/dataService";
+ import { CalculationService } from "../services/calculationService";
+ import { RecipeTreeNode } from "../components/tree";
+ import type { RecipeTree, PriceInfo, Data, RecipeChoice } from "../types/types";
+ 
+-const MIN_BUY_VOLUME = 3000;
+-const MIN_SELL_VOLUME = 1000;
+ 
+ interface ProfitEntry {
+   shardId: string;
+@@ -223,12 +221,22 @@ export const ProfitabilityPage = () => {
+         const dataService = DataService.getInstance();
+         const defaultRates = await dataService.loadDefaultRates();
+ 
+-        const data = buildDataFromFusionData(fusionData, defaultRates);
++        const rawData = buildDataFromFusionData(fusionData, defaultRates);
+ 
+         if (cancelled) return;
+ 
+         const params = DEFAULT_CALCULATION_PARAMS;
+         const service = CalculationService.getInstance();
++
++        // Quand "Stable" est actif, on retire du graphe les shards composantes à faible
++        // volume d'achat quotidien AVANT le calcul : l'algorithme choisit alors tout seul
++        // la meilleure recette restante (substitution), au lieu de simplement signaler après
++        // coup qu'une recette n'était pas valable.
++        const dailyBuyVolumes: Record<string, number> = {};
++        for (const [id, p] of Object.entries(currentPrices)) dailyBuyVolumes[id] = p.dailyBuyVolume;
++        const excludedShardIds = filterLowVolume ? getUnstableShardIds(dailyBuyVolumes) : new Set<string>();
++        const data = excludedShardIds.size > 0 ? applyStableFilter(rawData, excludedShardIds) : rawData;
++
+         const { choices, minCosts } = service.computeMinCosts(data, params);
+         const cycleNodes = service.findCycleNodes(choices);
+         const minCostsCache = { minCosts, choices };
+@@ -261,11 +269,12 @@ export const ProfitabilityPage = () => {
+             }
+           }
+ 
++          // Note : la shard finale elle-même n'est jamais exclue par "Stable" (seuls ses
++          // ingrédients le sont), donc son propre volume n'est plus vérifié ici. Ce qui reste
++          // à signaler, c'est uniquement à titre informatif quand "Stable" est désactivé :
++          // quels composants du tree seraient à faible volume si le filtre était actif.
+           const lowVolumeShards: string[] = [];
+           const volatileInTree: string[] = [];
+-          const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+-
+-          if (!outputVolumeOk) lowVolumeShards.push(shardId);
+ 
+           if (volatileShardIds.has(shardId)) volatileInTree.push(shardId);
+ 
+@@ -273,7 +282,7 @@ export const ProfitabilityPage = () => {
+             const buyNodes = getTreeBuyNodes(effectiveTree);
+             for (const nodeId of buyNodes) {
+               const nodePrice = currentPrices[nodeId];
+-              if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
++              if (nodePrice && nodePrice.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME) {
+                 if (!lowVolumeShards.includes(nodeId)) lowVolumeShards.push(nodeId);
+               }
+               if (volatileShardIds.has(nodeId)) {
+@@ -308,7 +317,7 @@ export const ProfitabilityPage = () => {
+     })();
+ 
+     return () => { cancelled = true; };
+-  }, [fusionData, prices, fusionLoading, priceLoading]);
++  }, [fusionData, prices, fusionLoading, priceLoading, filterLowVolume]);
+ 
+   useEffect(() => {
+     if (heavyDataVersion === 0 || !heavyDataRef.current || !prices) return;
+@@ -439,10 +448,10 @@ export const ProfitabilityPage = () => {
+             <button
+               onClick={() => setFilterLowVolume(!filterLowVolume)}
+               className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
+-              title={filterLowVolume ? "Filtering low-volume shards" : "Showing all shards"}
++              title={filterLowVolume ? "Remplace automatiquement les composants à faible volume par la meilleure alternative" : "Showing all shards"}
+             >
+               <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
+-              {filterLowVolume ? "Safe" : "All"}
++              {filterLowVolume ? "Stable" : "All"}
+             </button>
+             <button
+               onClick={() => setFilterVolatile(!filterVolatile)}
+@@ -450,7 +459,7 @@ export const ProfitabilityPage = () => {
+               title={filterVolatile ? "Filtering volatile price shards" : "Showing all shards"}
+             >
+               <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
+-              {filterVolatile ? "Stable" : "All"}
++              {filterVolatile ? "Safe" : "All"}
+             </button>
+             <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+               <button
+@@ -530,7 +539,7 @@ export const ProfitabilityPage = () => {
+           <div className="space-y-2">
+             <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 border border-slate-700/50 rounded-lg text-xs text-slate-300">
+               <Info className="w-4 h-4 flex-shrink-0 text-amber-400" />
+-              <span>Achat 24h &ge; <strong>{formatLargeNumber(MIN_BUY_VOLUME)}</strong>, Vente 24h &ge; <strong>{formatLargeNumber(MIN_SELL_VOLUME)}</strong> requis — active/désactive le filtre avec le bouton <ShieldCheck className="w-3 h-3 inline-block text-emerald-400" /> <strong>Safe</strong>. Prix instable (&ge;50%) filtré par <AlertTriangle className="w-3 h-3 inline-block text-amber-400" /> <strong>Stable</strong>.</span>
++              <span>Composants du tree à faible volume (&lt; <strong>{formatLargeNumber(STABLE_MIN_DAILY_BUY_VOLUME)}</strong> achats/jour) remplacés automatiquement par la meilleure alternative avec <ShieldCheck className="w-3 h-3 inline-block text-emerald-400" /> <strong>Stable</strong>. Prix instable (&ge;50%) filtré par <AlertTriangle className="w-3 h-3 inline-block text-amber-400" /> <strong>Safe</strong>.</span>
+             </div>
+             {results.map((entry) => {
+               const isProfitable = entry.profit > 0;
+@@ -703,8 +712,8 @@ export const ProfitabilityPage = () => {
+                     })()}
+                     {outVol && (
+                       <div className="mt-1.5 flex gap-3 text-[11px] text-slate-500">
+-                        <span>Achat 24h: <span className={outVol.dailyBuyVolume >= MIN_BUY_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailyBuyVolume)}</span></span>
+-                        <span>Vente 24h: <span className={outVol.dailySellVolume >= MIN_SELL_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailySellVolume)}</span></span>
++                        <span>Achat 24h: <span className={outVol.dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailyBuyVolume)}</span></span>
++                        <span>Vente 24h: <span className="text-slate-300">{formatLargeNumber(outVol.dailySellVolume)}</span></span>
+                       </div>
+                     )}
+                   </div>
+diff --git a/src/pages/RecipePage.tsx b/src/pages/RecipePage.tsx
+index cbf5581..b9eb086 100644
+--- a/src/pages/RecipePage.tsx
++++ b/src/pages/RecipePage.tsx
+@@ -1,15 +1,12 @@
+ import { useState, useEffect, useCallback, useRef } from "react";
+ import { ShardAutocomplete, RecipeCountBadge, SearchFilterInput, ShardDisplay, DropdownButton } from "../components";
+-import { getRarityColor, formatLargeNumber, loadBazaarCache, getTreeBuyNodes, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectVolatileShards } from "../utilities";
++import { getRarityColor, formatLargeNumber, loadBazaarCache, getTreeBuyNodes, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectVolatileShards, applyStableFilter, getUnstableShardIds, STABLE_MIN_DAILY_BUY_VOLUME } from "../utilities";
+ import { useFusionData, useDropdownManager, useRecipeState } from "../hooks";
+ import { processOutputRecipes, categorizeAndGroupRecipes, filterCategorizedRecipes, type Recipe, type CategorizedRecipes, type GroupedRecipe, type FusionData } from "../utilities";
+ import { DataService } from "../services/dataService";
+ import { CalculationService } from "../services/calculationService";
+ import { TrendingUp, TrendingDown, ShieldCheck, AlertTriangle } from "lucide-react";
+-import type { ShardWithKey, PriceInfo, Data, RecipeChoice } from "../types/types";
+-
+-const MIN_BUY_VOLUME = 3000;
+-const MIN_SELL_VOLUME = 1000;
++import type { ShardWithKey, PriceInfo, Data } from "../types/types";
+ 
+ function getInputRecipes(shard: ShardWithKey, fusionData: FusionData): Recipe[] {
+   const recipes: Recipe[] = [];
+@@ -31,6 +28,119 @@ function getInputRecipes(shard: ShardWithKey, fusionData: FusionData): Recipe[]
+ 
+ type RecipeMode = "input" | "output" | null;
+ 
++interface BestProfitResult {
++  profit: number;
++  margin: number;
++  craftCost: number;
++  outputShard: string;
++  outputQty: number;
++  otherInput: string;
++  sellRevenue: number;
++}
++
++/**
++ * Cherche, parmi toutes les shards fabricables à partir de `shardKey`, celle qui rapporte
++ * le plus de profit. Quand `filterLowVolume` ("Stable") est actif, les shards composantes
++ * dont le volume d'achat quotidien est trop faible sont retirées du graphe de recettes
++ * AVANT le calcul (`applyStableFilter`), pour que l'algorithme choisisse automatiquement
++ * la meilleure alternative restante — au lieu de simplement ignorer les résultats concernés
++ * après coup.
++ */
++function findBestProfitForShard(
++  fusionData: FusionData,
++  prices: Record<string, PriceInfo>,
++  baseData: Data,
++  shardKey: string,
++  options: { filterLowVolume: boolean; filterVolatile: boolean; buyMode: "order" | "instant"; sellMode: "order" | "instant" }
++): BestProfitResult | null {
++  const service = CalculationService.getInstance();
++  const params = DEFAULT_CALCULATION_PARAMS;
++
++  const dailyBuyVolumes: Record<string, number> = {};
++  for (const [id, p] of Object.entries(prices)) dailyBuyVolumes[id] = p.dailyBuyVolume;
++  const excludedShardIds = options.filterLowVolume ? getUnstableShardIds(dailyBuyVolumes) : new Set<string>();
++  const data = excludedShardIds.size > 0 ? applyStableFilter(baseData, excludedShardIds) : baseData;
++
++  const { choices } = service.computeMinCosts(data, params);
++  const cycleNodes = service.findCycleNodes(choices);
++
++  const cached = loadBazaarCache();
++  const previousPrices = cached?.prices ?? null;
++  const volatileShardIds = options.filterVolatile ? detectVolatileShards(prices, previousPrices) : new Set<string>();
++
++  let bestProfit = -Infinity;
++  let bestResult: Omit<BestProfitResult, "profit" | "margin"> | null = null;
++
++  for (const [outputShardId] of Object.entries(fusionData.recipes)) {
++    const priceInfo = prices[outputShardId];
++    if (!priceInfo) continue;
++    const effectiveSellRevenue = options.sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
++    if (effectiveSellRevenue <= 0) continue;
++
++    // La shard finale (celle qu'on essaie de vendre) reste soumise au seuil de volume :
++    // ce n'est pas un composant du tree, mais on veut quand même pouvoir la vendre en volume.
++    if (options.filterLowVolume && priceInfo.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME) continue;
++
++    const choice = choices.get(outputShardId);
++    if (!choice || choice.recipe === null) continue;
++
++    const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
++    const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params);
++    service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
++    const stats = service.collectTreeStats(tree, params);
++
++    if (options.filterVolatile) {
++      const buyNodes = getTreeBuyNodes(tree);
++      let volatileFailed = volatileShardIds.has(outputShardId);
++      if (!volatileFailed) {
++        for (const nodeId of buyNodes) {
++          if (volatileShardIds.has(nodeId)) {
++            volatileFailed = true;
++            break;
++          }
++        }
++      }
++      if (volatileFailed) continue;
++    }
++
++    let totalMatCost = 0;
++    let allMaterialsPriced = true;
++    stats.totalQuantities.forEach((qty, matId) => {
++      const matPriceInfo = prices[matId];
++      const matPrice = matPriceInfo ? (options.buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
++      if (matPrice === undefined || matPrice === null || matPrice <= 0) {
++        allMaterialsPriced = false;
++      }
++      totalMatCost += qty * (matPrice ?? 0);
++    });
++    if (!allMaterialsPriced || stats.totalQuantities.size === 0) continue;
++
++    const craftCost = totalMatCost;
++    const sellRevenue = effectiveSellRevenue * outputQty;
++    const profit = sellRevenue - craftCost;
++
++    if (profit > bestProfit) {
++      bestProfit = profit;
++      bestResult = {
++        outputShard: outputShardId,
++        outputQty,
++        otherInput: tree.method === "recipe"
++          ? (tree.inputs[0].shard === shardKey ? tree.inputs[1].shard : tree.inputs[0].shard)
++          : (choice.recipe.inputs[0] === shardKey ? choice.recipe.inputs[1] : choice.recipe.inputs[0]),
++        craftCost,
++        sellRevenue,
++      };
++    }
++  }
++
++  if (!bestResult) return null;
++
++  const profit = bestResult.sellRevenue - bestResult.craftCost;
++  const margin = bestResult.craftCost > 0 ? (profit / bestResult.craftCost) * 100 : 0;
++
++  return { profit, margin, ...bestResult };
++}
++
+ export const RecipePage = () => {
+   const { selectedShard, setSelectedShard, selectedOutputShard, setSelectedOutputShard } = useRecipeState();
+   const { fusionData, loading } = useFusionData();
+@@ -70,129 +180,27 @@ export const RecipePage = () => {
+ 
+   const cachedPricesRef = useRef<Record<string, PriceInfo> | null>(null);
+   const cachedDataRef = useRef<Data | null>(null);
+-  const cachedChoicesRef = useRef<Map<string, RecipeChoice> | null>(null);
+-  const cachedCycleNodesRef = useRef<string[][]>([]);
+   const cachedShardRef = useRef<string | null>(null);
+ 
+   const recalcProfitFromCache = useCallback(() => {
+     const prices = cachedPricesRef.current;
+-    const data = cachedDataRef.current;
+-    const choices = cachedChoicesRef.current;
+-    const cycleNodes = cachedCycleNodesRef.current;
++    const baseData = cachedDataRef.current;
+     const shardKey = cachedShardRef.current;
+-    if (!prices || !data || !choices || !shardKey || !fusionData) return;
+-
+-    let bestProfit = -Infinity;
+-    let bestResult: {
+-      outputShard: string;
+-      outputQty: number;
+-      otherInput: string;
+-      craftCost: number;
+-      sellRevenue: number;
+-    } | null = null;
+-
+-    const params = DEFAULT_CALCULATION_PARAMS;
+-    const service = CalculationService.getInstance();
+-
+-    for (const [outputShardId] of Object.entries(fusionData.recipes)) {
+-      const priceInfo = prices[outputShardId];
+-      if (!priceInfo) continue;
+-      const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
+-      if (effectiveSellRevenue <= 0) continue;
+-
+-      const choice = choices.get(outputShardId);
+-      if (!choice || choice.recipe === null) continue;
+-
+-      const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
+-      const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params);
+-      service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
+-      const stats = service.collectTreeStats(tree, params);
+-
+-      if (filterLowVolume || filterVolatile) {
+-        const buyNodes = getTreeBuyNodes(tree);
+-        if (filterLowVolume) {
+-          const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+-          let volumeFailed = !outputVolumeOk;
+-          if (!volumeFailed) {
+-            for (const nodeId of buyNodes) {
+-              const nodePrice = prices[nodeId];
+-              if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
+-                volumeFailed = true;
+-                break;
+-              }
+-            }
+-          }
+-          if (volumeFailed) continue;
+-        }
+-        if (filterVolatile) {
+-          const cached = loadBazaarCache();
+-          const previousPrices = cached?.prices ?? null;
+-          const volatileShardIds = detectVolatileShards(prices, previousPrices);
+-          let volatileFailed = volatileShardIds.has(outputShardId);
+-          if (!volatileFailed) {
+-            for (const nodeId of buyNodes) {
+-              if (volatileShardIds.has(nodeId)) {
+-                volatileFailed = true;
+-                break;
+-              }
+-            }
+-          }
+-          if (volatileFailed) continue;
+-        }
+-      }
++    if (!prices || !baseData || !shardKey || !fusionData) return;
+ 
+-      let totalMatCost = 0;
+-      let allMaterialsPriced = true;
+-      stats.totalQuantities.forEach((qty, matId) => {
+-        const matPriceInfo = prices[matId];
+-        const matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+-        if (matPrice === undefined || matPrice === null || matPrice <= 0) {
+-          allMaterialsPriced = false;
+-        }
+-        totalMatCost += qty * (matPrice ?? 0);
+-      });
+-      if (!allMaterialsPriced || stats.totalQuantities.size === 0) continue;
+-
+-      const craftCost = totalMatCost;
+-      const sellRevenue = effectiveSellRevenue * outputQty;
+-      const profit = sellRevenue - craftCost;
+-
+-      if (profit > bestProfit) {
+-        bestProfit = profit;
+-        bestResult = {
+-          outputShard: outputShardId,
+-          outputQty,
+-          otherInput: tree.method === "recipe"
+-            ? (tree.inputs[0].shard === shardKey ? tree.inputs[1].shard : tree.inputs[0].shard)
+-            : (choice.recipe.inputs[0] === shardKey ? choice.recipe.inputs[1] : choice.recipe.inputs[0]),
+-          craftCost,
+-          sellRevenue,
+-        };
+-      }
+-    }
+-
+-    if (!bestResult) {
+-      setProfitData(null);
+-      return;
+-    }
+-
+-    const profit = bestResult.sellRevenue - bestResult.craftCost;
+-    const margin = bestResult.craftCost > 0 ? (profit / bestResult.craftCost) * 100 : 0;
+-
+-    setProfitData({
+-      profit,
+-      margin,
+-      craftCost: bestResult.craftCost,
+-      outputShard: bestResult.outputShard,
+-      outputQty: bestResult.outputQty,
+-      otherInput: bestResult.otherInput,
+-      sellRevenue: bestResult.sellRevenue,
++    const best = findBestProfitForShard(fusionData, prices, baseData, shardKey, {
++      filterLowVolume,
++      filterVolatile,
++      buyMode,
++      sellMode,
+     });
++
++    setProfitData(best);
+   }, [fusionData, filterLowVolume, filterVolatile, buyMode, sellMode]);
+ 
+   const calculateProfitFull = useCallback(async (shard: ShardWithKey) => {
+     if (!fusionData) return;
+-    let isCancelled = false;
++    const isCancelled = false;
+     setProfitLoading(true);
+     try {
+       const dataService = DataService.getInstance();
+@@ -219,123 +227,19 @@ export const RecipePage = () => {
+         }
+       }
+ 
+-      const params = DEFAULT_CALCULATION_PARAMS;
+-
+-      const service = CalculationService.getInstance();
+-      const { choices } = service.computeMinCosts(data, params);
+-      const cycleNodes = service.findCycleNodes(choices);
+-
+       cachedPricesRef.current = prices;
+       cachedDataRef.current = data;
+-      cachedChoicesRef.current = choices;
+-      cachedCycleNodesRef.current = cycleNodes;
+       cachedShardRef.current = shard.key;
+ 
+-      let bestProfit = -Infinity;
+-      let bestResult: {
+-        outputShard: string;
+-        outputQty: number;
+-        otherInput: string;
+-        craftCost: number;
+-        sellRevenue: number;
+-      } | null = null;
+-
+-      const cached = loadBazaarCache();
+-      const previousPrices = cached?.prices ?? null;
+-      const volatileShardIds = detectVolatileShards(prices, previousPrices);
+-
+-      for (const [outputShardId] of Object.entries(fusionData.recipes)) {
+-        const priceInfo = prices[outputShardId];
+-        if (!priceInfo) continue;
+-        const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
+-        if (effectiveSellRevenue <= 0) continue;
+-
+-        const choice = choices.get(outputShardId);
+-        if (!choice || choice.recipe === null) continue;
+-
+-        const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
+-        const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params);
+-        service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
+-        const stats = service.collectTreeStats(tree, params);
+-
+-        if (filterLowVolume || filterVolatile) {
+-          const buyNodes = getTreeBuyNodes(tree);
+-          if (filterLowVolume) {
+-            const outputVolumeOk = priceInfo.dailyBuyVolume >= MIN_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+-            let volumeFailed = !outputVolumeOk;
+-            if (!volumeFailed) {
+-              for (const nodeId of buyNodes) {
+-                const nodePrice = prices[nodeId];
+-                if (nodePrice && nodePrice.dailySellVolume < MIN_SELL_VOLUME) {
+-                  volumeFailed = true;
+-                  break;
+-                }
+-              }
+-            }
+-            if (volumeFailed) continue;
+-          }
+-          if (filterVolatile) {
+-            let volatileFailed = volatileShardIds.has(outputShardId);
+-            if (!volatileFailed) {
+-              for (const nodeId of buyNodes) {
+-                if (volatileShardIds.has(nodeId)) {
+-                  volatileFailed = true;
+-                  break;
+-                }
+-              }
+-            }
+-            if (volatileFailed) continue;
+-          }
+-        }
+-
+-        let totalMatCost = 0;
+-        let allMaterialsPriced = true;
+-        stats.totalQuantities.forEach((qty, matId) => {
+-          const matPriceInfo = prices[matId];
+-          const matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+-          if (matPrice === undefined || matPrice === null || matPrice <= 0) {
+-            allMaterialsPriced = false;
+-          }
+-          totalMatCost += qty * (matPrice ?? 0);
+-        });
+-        if (!allMaterialsPriced || stats.totalQuantities.size === 0) continue;
+-
+-        const craftCost = totalMatCost;
+-        const sellRevenue = effectiveSellRevenue * outputQty;
+-        const profit = sellRevenue - craftCost;
+-
+-        if (profit > bestProfit) {
+-          bestProfit = profit;
+-          bestResult = {
+-            outputShard: outputShardId,
+-            outputQty,
+-            otherInput: tree.method === "recipe"
+-              ? (tree.inputs[0].shard === shard.key ? tree.inputs[1].shard : tree.inputs[0].shard)
+-              : (choice.recipe.inputs[0] === shard.key ? choice.recipe.inputs[1] : choice.recipe.inputs[0]),
+-            craftCost,
+-            sellRevenue,
+-          };
+-        }
+-      }
+-
+-      if (!bestResult) {
+-        if (!isCancelled) setProfitData(null);
+-        return;
+-      }
+-
+-      const profit = bestResult.sellRevenue - bestResult.craftCost;
+-      const margin = bestResult.craftCost > 0 ? (profit / bestResult.craftCost) * 100 : 0;
++      const best = findBestProfitForShard(fusionData, prices, data, shard.key, {
++        filterLowVolume,
++        filterVolatile,
++        buyMode,
++        sellMode,
++      });
+ 
+       if (!isCancelled) {
+-        setProfitData({
+-          profit,
+-          margin,
+-          craftCost: bestResult.craftCost,
+-          outputShard: bestResult.outputShard,
+-          outputQty: bestResult.outputQty,
+-          otherInput: bestResult.otherInput,
+-          sellRevenue: bestResult.sellRevenue,
+-        });
++        setProfitData(best);
+       }
+     } catch {
+       if (!isCancelled) setProfitData(null);
+@@ -720,10 +624,10 @@ export const RecipePage = () => {
+               <button
+                 onClick={() => setFilterLowVolume(!filterLowVolume)}
+                 className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-300"}`}
+-                title={filterLowVolume ? "Filtering low-volume shards" : "Showing all shards"}
++                title={filterLowVolume ? "Remplace automatiquement les composants à faible volume par la meilleure alternative" : "Showing all shards"}
+               >
+                 <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
+-                {filterLowVolume ? "Safe" : "All"}
++                {filterLowVolume ? "Stable" : "All"}
+               </button>
+               <button
+                 onClick={() => setFilterVolatile(!filterVolatile)}
+@@ -731,7 +635,7 @@ export const RecipePage = () => {
+                 title={filterVolatile ? "Filtering volatile price shards" : "Showing all shards"}
+               >
+                 <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
+-                {filterVolatile ? "Stable" : "All"}
++                {filterVolatile ? "Safe" : "All"}
+               </button>
+               <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+                 <button
+diff --git a/src/services/dataService.ts b/src/services/dataService.ts
+index aa79488..3a31ec4 100644
+--- a/src/services/dataService.ts
++++ b/src/services/dataService.ts
+@@ -16,6 +16,9 @@ export class DataService {
+   private shardNameToKeyCache: Record<string, string> | null = null;
+   private defaultRatesCache: Record<string, number> | null = null;
+   private fusionDataCache: FusionData | null = null;
++  private snapshotsCache: Record<string, SkyCoflBazaarSnapshot> | null = null;
++  private snapshotsCacheTime = 0;
++  private readonly SNAPSHOTS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+ 
+   public static getInstance(): DataService {
+     if (!DataService.instance) {
+@@ -133,16 +136,37 @@ export class DataService {
+     return this.defaultRatesCache;
+   }
+ 
+-  async loadShardCosts(useInstantBuyPrices: boolean): Promise<Record<string, number>> {
++  /** Récupère les snapshots bazaar de toutes les shards, avec un cache en mémoire (TTL 5 minutes)
++   * pour éviter de refaire ~189 requêtes réseau à chaque calcul. */
++  async loadBazaarSnapshots(): Promise<Record<string, SkyCoflBazaarSnapshot>> {
++    const now = Date.now();
++    if (this.snapshotsCache && now - this.snapshotsCacheTime < this.SNAPSHOTS_CACHE_TTL_MS) {
++      return this.snapshotsCache;
++    }
+     const shards = await this.loadShards();
+-    const skyCoflPrices = await this.fetchSkyCoflBazaarPrices(shards);
++    const snapshots = await this.fetchSkyCoflBazaarPrices(shards);
++    this.snapshotsCache = snapshots;
++    this.snapshotsCacheTime = now;
++    return snapshots;
++  }
++
++  /** Volume d'achat quotidien par shard (buyMovingWeek / 7, avec repli sur buyVolume),
++   * utilisé par le filtre "Stable". */
++  async loadDailyBuyVolumes(): Promise<Record<string, number>> {
++    const snapshots = await this.loadBazaarSnapshots();
++    const volumes: Record<string, number> = {};
++    for (const [shardId, snapshot] of Object.entries(snapshots)) {
++      volumes[shardId] = (snapshot.buyMovingWeek ?? 0) > 0 ? snapshot.buyMovingWeek / 7 : (snapshot.buyVolume ?? 0);
++    }
++    return volumes;
++  }
++
++  async loadShardCosts(useInstantBuyPrices: boolean): Promise<Record<string, number>> {
++    const skyCoflPrices = await this.loadBazaarSnapshots();
+     const costs: Record<string, number> = {};
+ 
+-    for (const shard of shards) {
+-      const snapshot = skyCoflPrices[shard.id];
+-      if (snapshot) {
+-        costs[shard.id] = useInstantBuyPrices ? snapshot.buyPrice : snapshot.sellPrice;
+-      }
++    for (const [shardId, snapshot] of Object.entries(skyCoflPrices)) {
++      costs[shardId] = useInstantBuyPrices ? snapshot.buyPrice : snapshot.sellPrice;
+     }
+ 
+     return costs;
+diff --git a/src/services/workerCalculationService.ts b/src/services/workerCalculationService.ts
+index 5a95c98..6c73190 100644
+--- a/src/services/workerCalculationService.ts
++++ b/src/services/workerCalculationService.ts
+@@ -1,4 +1,16 @@
+ import type { CalculationParams, CalculationResult, RecipeOverride, Data, RecipeChoice, InventoryCalculationResult } from "../types/types";
++import { applyStableFilter } from "../utilities/stableFilter";
++
++/**
++ * Quand fourni, retire du graphe de recettes toute shard de `excludedShardIds` (sauf
++ * `keepShardId`, la shard finale demandée) avant de lancer le calcul : elle devient
++ * inachetable directement et ne peut plus être utilisée comme ingrédient nulle part.
++ * L'algorithme retrouve alors automatiquement la meilleure recette restante.
++ */
++export interface StableFilterOptions {
++  excludedShardIds: Set<string>;
++  keepShardId?: string | Set<string>;
++}
+ 
+ type ProgressPhase = "parsing" | "computing" | "building" | "assigning" | "finalizing";
+ 
+@@ -58,7 +70,8 @@ export function calculateOptimalPathWithWorker(
+   requiredQuantity: number,
+   params: CalculationParams,
+   recipeOverrides: RecipeOverride[] = [],
+-  onProgress?: (p: WorkerProgress) => void
++  onProgress?: (p: WorkerProgress) => void,
++  stableFilter?: StableFilterOptions
+ ): { promise: Promise<{ result: CalculationResult; parsedData: Data }>; cancel: () => void } {
+   const worker = new Worker(new URL("../workers/calculationWorker.ts", import.meta.url), { type: "module" });
+   let cancelled = false;
+@@ -69,7 +82,11 @@ export function calculateOptimalPathWithWorker(
+       const service = CalculationService.getInstance();
+ 
+       onProgress?.({ phase: "parsing", progress: 0, message: "Parsing data..." });
+-      const parsedData = await service.parseData(params);
++      const rawParsedData = await service.parseData(params);
++      const parsedData =
++        stableFilter && stableFilter.excludedShardIds.size > 0
++          ? applyStableFilter(rawParsedData, stableFilter.excludedShardIds, stableFilter.keepShardId ?? targetShard)
++          : rawParsedData;
+ 
+       if (cancelled) { worker.terminate(); reject(new Error("Cancelled")); return; }
+ 
+@@ -122,7 +139,8 @@ export function calculateInventoryWithWorker(
+   recipeOverrides: RecipeOverride[],
+   inventory: Map<string, number>,
+   ownedAttributes: Map<string, number>,
+-  onProgress?: (p: WorkerProgress) => void
++  onProgress?: (p: WorkerProgress) => void,
++  stableFilter?: StableFilterOptions
+ ): { promise: Promise<{ result: InventoryCalculationResult; parsedData: Data }>; cancel: () => void } {
+   const worker = new Worker(new URL("../workers/calculationWorker.ts", import.meta.url), { type: "module" });
+   let cancelled = false;
+@@ -133,7 +151,11 @@ export function calculateInventoryWithWorker(
+       const service = CalculationService.getInstance();
+ 
+       onProgress?.({ phase: "parsing", progress: 0, message: "Parsing data..." });
+-      const parsedData = await service.parseData(params);
++      const rawParsedData = await service.parseData(params);
++      const parsedData =
++        stableFilter && stableFilter.excludedShardIds.size > 0
++          ? applyStableFilter(rawParsedData, stableFilter.excludedShardIds, stableFilter.keepShardId ?? targetShard)
++          : rawParsedData;
+ 
+       if (cancelled) { worker.terminate(); reject(new Error("Cancelled")); return; }
+ 
+@@ -190,7 +212,8 @@ export function calculateMultipleShardsParallel(
+   targets: Array<{ shard: string; quantity: number }>,
+   params: CalculationParams,
+   recipeOverrides: RecipeOverride[] = [],
+-  onProgress?: (p: WorkerProgress) => void
++  onProgress?: (p: WorkerProgress) => void,
++  stableFilter?: StableFilterOptions
+ ): { promise: Promise<CalculationResult[]>; cancel: () => void } {
+   const maxWorkers = Math.min(navigator.hardwareConcurrency || 4, 8, targets.length);
+ 
+@@ -213,7 +236,12 @@ export function calculateMultipleShardsParallel(
+ 
+         const { CalculationService } = await import("../services/calculationService");
+         const service = CalculationService.getInstance();
+-        const parsedData = await service.parseData(params);
++        const rawParsedData = await service.parseData(params);
++        const keepIds = stableFilter?.keepShardId ?? new Set(targets.map((t) => t.shard));
++        const parsedData =
++          stableFilter && stableFilter.excludedShardIds.size > 0
++            ? applyStableFilter(rawParsedData, stableFilter.excludedShardIds, keepIds)
++            : rawParsedData;
+ 
+         onProgress?.({
+           phase: "computing",
+diff --git a/src/utilities/index.ts b/src/utilities/index.ts
+index 8d2efe8..c347556 100644
+--- a/src/utilities/index.ts
++++ b/src/utilities/index.ts
+@@ -4,5 +4,6 @@ export * from "./localStorage";
+ export * from "./recipeUtils";
+ export * from "./shardFilters";
+ export * from "./profitUtils";
++export * from "./stableFilter";
+ export { imagePreloader, ImagePreloader } from "./imagePreloader";
+ export { getShardIconIds, SHARD_ICON_IDS } from "./getShardIconIds";
+diff --git a/src/utilities/stableFilter.ts b/src/utilities/stableFilter.ts
+new file mode 100644
+index 0000000..c361bfa
+--- /dev/null
++++ b/src/utilities/stableFilter.ts
+@@ -0,0 +1,84 @@
++import type { Data, Shards, Recipes } from "../types/types";
++
++/** Volume d'achat quotidien minimum pour qu'une shard soit utilisable comme composant de craft. */
++export const STABLE_MIN_DAILY_BUY_VOLUME = 5000;
++
++/**
++ * Renvoie l'ensemble des shards dont le volume d'achat quotidien est en dessous du seuil
++ * "Stable". Ne nécessite aucun nouvel appel réseau : `dailyBuyVolumes` est déjà calculée par
++ * ailleurs (ex. DataService.loadDailyBuyVolumes()).
++ */
++export function getUnstableShardIds(dailyBuyVolumes: Record<string, number>): Set<string> {
++  const excluded = new Set<string>();
++  for (const [shardId, volume] of Object.entries(dailyBuyVolumes)) {
++    if (volume < STABLE_MIN_DAILY_BUY_VOLUME) {
++      excluded.add(shardId);
++    }
++  }
++  return excluded;
++}
++
++/**
++ * Renvoie une copie filtrée de `data` où chaque shard de `excludedShardIds` (sauf
++ * `keepShardId`, la shard finale demandée par l'utilisateur) devient totalement
++ * indisponible comme composant de craft :
++ *  - son coût d'achat direct devient infini (rate = 0, voir CalculationService.getDirectCost
++ *    qui renvoie déjà Infinity pour rate <= 0),
++ *  - elle ne peut plus être utilisée comme ingrédient dans aucune recette, pour aucune
++ *    autre shard, à aucun niveau de l'arbre.
++ *
++ * L'algorithme de calcul existant (CalculationService.computeMinCosts), en tournant sur ce
++ * graphe "nettoyé", retrouve alors automatiquement le meilleur chemin restant : c'est
++ * l'équivalent de "essayer les arbres du moins cher au plus cher et prendre le premier
++ * valide", mais en une seule passe, sans énumérer les arbres un par un.
++ */
++export function applyStableFilter(data: Data, excludedShardIds: Set<string>, keepShardId?: string | Set<string>): Data {
++  if (excludedShardIds.size === 0) return data;
++
++  const isKept = (id: string): boolean => {
++    if (!keepShardId) return false;
++    return typeof keepShardId === "string" ? id === keepShardId : keepShardId.has(id);
++  };
++
++  const filteredShards: Shards = {};
++  for (const [id, shard] of Object.entries(data.shards)) {
++    const isExcluded = excludedShardIds.has(id) && !isKept(id);
++    filteredShards[id] = isExcluded ? { ...shard, rate: 0 } : shard;
++  }
++
++  const filteredRecipes: Recipes = {};
++  for (const [output, recipeList] of Object.entries(data.recipes)) {
++    filteredRecipes[output] = recipeList.filter((recipe) => {
++      const [input1, input2] = recipe.inputs;
++      const input1Excluded = excludedShardIds.has(input1) && !isKept(input1);
++      const input2Excluded = excludedShardIds.has(input2) && !isKept(input2);
++      return !input1Excluded && !input2Excluded;
++    });
++  }
++
++  return { shards: filteredShards, recipes: filteredRecipes };
++}
++
++/**
++ * Mémoïsation simple : ne reconstruit une version filtrée de `data` que si l'ensemble des
++ * shards exclues change réellement (ex. après un rafraîchissement des prix), pas à chaque
++ * appel/render. À instancier une fois (ex. useRef ou module-level selon le contexte d'appel).
++ */
++export class StableFilterCache {
++  private lastKey: string | null = null;
++  private lastData: Data | null = null;
++  private lastBaseData: Data | null = null;
++
++  get(baseData: Data, excludedShardIds: Set<string>, keepShardId?: string | Set<string>): Data {
++    const keepKey = typeof keepShardId === "string" ? keepShardId : keepShardId ? [...keepShardId].sort().join(",") : "";
++    const key = `${[...excludedShardIds].sort().join(",")}|${keepKey}`;
++    if (this.lastData && this.lastKey === key && this.lastBaseData === baseData) {
++      return this.lastData;
++    }
++    const filtered = applyStableFilter(baseData, excludedShardIds, keepShardId);
++    this.lastKey = key;
++    this.lastData = filtered;
++    this.lastBaseData = baseData;
++    return filtered;
++  }
++}
+-- 
+2.43.0
+
