@@ -7,30 +7,17 @@ interface FusionData {
   recipes: Record<string, Record<string, string[][]>>;
 }
 
-interface BazaarCache {
-  data: Record<string, number>;
-  timestamp: number;
-  useInstantBuyPrices: boolean;
-}
-
-interface HypixelOrderBookEntry {
+// Order book entry shape — compatible with both Hypixel and Coflnet APIs
+interface OrderBookEntry {
   amount: number;
   pricePerUnit: number;
   orders: number;
 }
 
-interface HypixelProduct {
-  quick_status: {
-    buyPrice: number;
-    sellPrice: number;
-    buyVolume: number;
-    sellVolume: number;
-    buyMovingWeek: number;
-    sellMovingWeek: number;
-  };
-  sell_summary?: HypixelOrderBookEntry[];
-  buy_summary?: HypixelOrderBookEntry[];
-}
+// Price data source: SkyCoflnet API (https://sky.coflnet.com/api)
+// Chosen over direct Hypixel API for richer data (order book snapshots, price history)
+// and to provide a consistent single source of truth across all tabs.
+// See: https://sky.coflnet.com/about, https://sky.coflnet.com/wiki/api
 
 export class DataService {
   private static instance: DataService;
@@ -38,10 +25,14 @@ export class DataService {
   private shardNameToKeyCache: Record<string, string> | null = null;
   private defaultRatesCache: Record<string, number> | null = null;
   private fusionDataCache: FusionData | null = null;
-  private bazaarPriceCache: BazaarCache | null = null;
-  private bazaarRawProductsCache: Record<string, HypixelProduct> | null = null;
-  private bazaarRawTimestamp: number = 0;
-  private readonly BAZAAR_CACHE_TTL = 120_000;
+
+  // Shared cache for all Coflnet bazaar fetches (prices + order books)
+  private coflBazaarCache: {
+    prices: Record<string, PriceInfo>;
+    orderBooks: Record<string, { sellSummary: OrderBookEntry[]; buySummary: OrderBookEntry[] }>;
+    timestamp: number;
+  } | null = null;
+  private readonly COFL_BAZAAR_CACHE_TTL = 120_000;
 
   public static getInstance(): DataService {
     if (!DataService.instance) {
@@ -62,72 +53,151 @@ export class DataService {
     }
   }
 
-  private async fetchHypixelBazaarProducts(): Promise<Record<string, HypixelProduct>> {
-    const now = Date.now();
-    if (this.bazaarRawProductsCache && now - this.bazaarRawTimestamp < this.BAZAAR_CACHE_TTL) {
-      return this.bazaarRawProductsCache;
-    }
-    const response = await fetch("https://api.hypixel.net/v2/skyblock/bazaar");
-    if (!response.ok) {
-      throw new Error(`Hypixel API error: ${response.status}`);
-    }
-    const json = await response.json();
-    const products: Record<string, HypixelProduct> = json.products || {};
-    this.bazaarRawProductsCache = products;
-    this.bazaarRawTimestamp = now;
-    return products;
-  }
+  // ─── Coflnet batch fetch helper ───────────────────────────────────────────
 
-  async fetchBazaarPriceInfos(): Promise<Record<string, PriceInfo>> {
-    try {
-      const products = await this.fetchHypixelBazaarProducts();
-      const shards = await this.loadShards();
-      const infos: Record<string, PriceInfo> = {};
-      for (const shard of shards) {
-        const product = products[shard.internal_id];
-        if (product?.quick_status) {
-          const qs = product.quick_status;
-          infos[shard.id] = {
-            buyCost: qs.buyPrice,
-            sellRevenue: qs.sellPrice,
-            buyVolume: qs.buyVolume,
-            sellVolume: qs.sellVolume,
-            dailyBuyVolume: qs.buyMovingWeek / 7,
-            dailySellVolume: qs.sellMovingWeek / 7,
-          };
+  private async _fetchCoflBazaarSnapshots(
+    internalIds: string[]
+  ): Promise<Map<string, {
+    buyPrice: number; sellPrice: number;
+    buyVolume: number; sellVolume: number;
+    buyMovingWeek: number; sellMovingWeek: number;
+    buyOrders: OrderBookEntry[]; sellOrders: OrderBookEntry[];
+  } | null>> {
+    const results = new Map<string, {
+      buyPrice: number; sellPrice: number;
+      buyVolume: number; sellVolume: number;
+      buyMovingWeek: number; sellMovingWeek: number;
+      buyOrders: OrderBookEntry[]; sellOrders: OrderBookEntry[];
+    } | null>();
+
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < internalIds.length; i += BATCH_SIZE) {
+      const batch = internalIds.slice(i, i + BATCH_SIZE);
+      const settled = await Promise.allSettled(
+        batch.map(async (id) => {
+          const resp = await fetch(`https://sky.coflnet.com/api/bazaar/${id}/snapshot`, {
+            headers: { "User-Agent": "SkyShards/1.0 (+https://github.com/lougio08/shard)" },
+          });
+          if (resp.status === 429) {
+            console.warn(`[SkyCofl] Rate limited on bazaar snapshot for ${id}`);
+            return null;
+          }
+          if (!resp.ok) return null;
+          return { id, data: await resp.json() };
+        })
+      );
+
+      for (const result of settled) {
+        if (result.status === "fulfilled" && result.value) {
+          const { id, data } = result.value;
+          results.set(id, {
+            buyPrice: data.buyPrice ?? 0,
+            sellPrice: data.sellPrice ?? 0,
+            buyVolume: data.buyVolume ?? 0,
+            sellVolume: data.sellVolume ?? 0,
+            buyMovingWeek: data.buyMovingWeek ?? 0,
+            sellMovingWeek: data.sellMovingWeek ?? 0,
+            buyOrders: data.buyOrders ?? [],
+            sellOrders: data.sellOrders ?? [],
+          });
+        } else if (result.status === "fulfilled") {
+          // result.value is null (429 or error)
         }
       }
-      return infos;
-    } catch {
-      return {};
+
+      if (i + BATCH_SIZE < internalIds.length) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
     }
+
+    return results;
   }
+
+  private _mapSnapshotsToPrices(
+    shards: Shard[],
+    snapshots: Map<string, {
+      buyPrice: number; sellPrice: number;
+      buyVolume: number; sellVolume: number;
+      buyMovingWeek: number; sellMovingWeek: number;
+    } | null>
+  ): Record<string, PriceInfo> {
+    const prices: Record<string, PriceInfo> = {};
+    for (const shard of shards) {
+      const snap = snapshots.get(shard.internal_id);
+      if (snap) {
+        prices[shard.id] = {
+          buyCost: snap.buyPrice,
+          sellRevenue: snap.sellPrice,
+          buyVolume: snap.buyVolume,
+          sellVolume: snap.sellVolume,
+          dailyBuyVolume: snap.buyMovingWeek / 7,
+          dailySellVolume: snap.sellMovingWeek / 7,
+        };
+      }
+    }
+    return prices;
+  }
+
+  private _mapSnapshotsToOrderBooks(
+    shards: Shard[],
+    snapshots: Map<string, {
+      buyOrders: OrderBookEntry[]; sellOrders: OrderBookEntry[];
+    } | null>
+  ): Record<string, { sellSummary: OrderBookEntry[]; buySummary: OrderBookEntry[] }> {
+    const orderBooks: Record<string, { sellSummary: OrderBookEntry[]; buySummary: OrderBookEntry[] }> = {};
+    for (const shard of shards) {
+      const snap = snapshots.get(shard.internal_id);
+      if (snap) {
+        orderBooks[shard.id] = {
+          sellSummary: snap.sellOrders,
+          buySummary: snap.buyOrders,
+        };
+      }
+    }
+    return orderBooks;
+  }
+
+  private _updateCoflCache(
+    prices: Record<string, PriceInfo>,
+    orderBooks: Record<string, { sellSummary: OrderBookEntry[]; buySummary: OrderBookEntry[] }> | null
+  ) {
+    this.coflBazaarCache = {
+      prices,
+      orderBooks: orderBooks ?? this.coflBazaarCache?.orderBooks ?? {},
+      timestamp: Date.now(),
+    };
+  }
+
+  // ─── Public API ───────────────────────────────────────────────────────────
 
   async loadShardCosts(useInstantBuyPrices: boolean): Promise<Record<string, number>> {
-    const now = Date.now();
-    if (this.bazaarPriceCache && now - this.bazaarPriceCache.timestamp < this.BAZAAR_CACHE_TTL && this.bazaarPriceCache.useInstantBuyPrices === useInstantBuyPrices) {
-      return this.bazaarPriceCache.data;
+    if (this.coflBazaarCache && Date.now() - this.coflBazaarCache.timestamp < this.COFL_BAZAAR_CACHE_TTL) {
+      return this._deriveCostsFromPrices(this.coflBazaarCache.prices, useInstantBuyPrices);
     }
 
     try {
-      const products = await this.fetchHypixelBazaarProducts();
       const shards = await this.loadShards();
-      const costs: Record<string, number> = {};
-      for (const shard of shards) {
-        const product = products[shard.internal_id];
-        if (product?.quick_status) {
-          costs[shard.id] = useInstantBuyPrices ? product.quick_status.sellPrice : product.quick_status.buyPrice;
-        }
-      }
-
-      this.bazaarPriceCache = { data: costs, timestamp: now, useInstantBuyPrices };
-      return costs;
-    } catch (error) {
-      if (this.bazaarPriceCache && this.bazaarPriceCache.useInstantBuyPrices === useInstantBuyPrices) {
-        return this.bazaarPriceCache.data;
+      const internalIds = shards
+        .map(s => s.internal_id)
+        .filter(id => id && id.trim() !== "");
+      const snapshots = await this._fetchCoflBazaarSnapshots(internalIds);
+      const prices = this._mapSnapshotsToPrices(shards, snapshots);
+      this._updateCoflCache(prices, null);
+      return this._deriveCostsFromPrices(prices, useInstantBuyPrices);
+    } catch {
+      if (this.coflBazaarCache) {
+        return this._deriveCostsFromPrices(this.coflBazaarCache.prices, useInstantBuyPrices);
       }
       return {};
     }
+  }
+
+  private _deriveCostsFromPrices(prices: Record<string, PriceInfo>, useInstantBuyPrices: boolean): Record<string, number> {
+    const costs: Record<string, number> = {};
+    for (const [id, info] of Object.entries(prices)) {
+      costs[id] = useInstantBuyPrices ? info.sellRevenue : info.buyCost;
+    }
+    return costs;
   }
 
   async loadShards(): Promise<ShardWithKey[]> {
@@ -234,81 +304,43 @@ export class DataService {
     return this.sortShardsByQuery(filtered, query);
   }
 
-  async fetchBazaarInfosWithOrders(): Promise<{
+  async fetchCoflBazaarInfosWithOrders(): Promise<{
     prices: Record<string, PriceInfo>;
-    orderBooks: Record<string, { sellSummary: HypixelOrderBookEntry[]; buySummary: HypixelOrderBookEntry[] }>;
+    orderBooks: Record<string, { sellSummary: OrderBookEntry[]; buySummary: OrderBookEntry[] }>;
   }> {
+    if (this.coflBazaarCache && Date.now() - this.coflBazaarCache.timestamp < this.COFL_BAZAAR_CACHE_TTL) {
+      return { prices: this.coflBazaarCache.prices, orderBooks: this.coflBazaarCache.orderBooks };
+    }
+
     try {
-      const products = await this.fetchHypixelBazaarProducts();
       const shards = await this.loadShards();
-      const prices: Record<string, PriceInfo> = {};
-      const orderBooks: Record<string, { sellSummary: HypixelOrderBookEntry[]; buySummary: HypixelOrderBookEntry[] }> = {};
-      for (const shard of shards) {
-        const product = products[shard.internal_id];
-        if (product?.quick_status) {
-          const qs = product.quick_status;
-          prices[shard.id] = {
-            buyCost: qs.buyPrice,
-            sellRevenue: qs.sellPrice,
-            buyVolume: qs.buyVolume,
-            sellVolume: qs.sellVolume,
-            dailyBuyVolume: qs.buyMovingWeek / 7,
-            dailySellVolume: qs.sellMovingWeek / 7,
-          };
-          orderBooks[shard.id] = {
-            sellSummary: product.sell_summary ?? [],
-            buySummary: product.buy_summary ?? [],
-          };
-        }
-      }
+      const internalIds = shards
+        .map(s => s.internal_id)
+        .filter(id => id && id.trim() !== "");
+      const snapshots = await this._fetchCoflBazaarSnapshots(internalIds);
+      const prices = this._mapSnapshotsToPrices(shards, snapshots);
+      const orderBooks = this._mapSnapshotsToOrderBooks(shards, snapshots);
+      this._updateCoflCache(prices, orderBooks);
       return { prices, orderBooks };
     } catch {
+      if (this.coflBazaarCache) {
+        return { prices: this.coflBazaarCache.prices, orderBooks: this.coflBazaarCache.orderBooks };
+      }
       return { prices: {}, orderBooks: {} };
     }
   }
 
   async fetchSkyCoflBazaarPrices(shards: Shard[]): Promise<Record<string, PriceInfo> | null> {
-    const prices: Record<string, PriceInfo> = {};
+    if (this.coflBazaarCache && Date.now() - this.coflBazaarCache.timestamp < this.COFL_BAZAAR_CACHE_TTL) {
+      return Object.keys(this.coflBazaarCache.prices).length > 0 ? this.coflBazaarCache.prices : null;
+    }
+
     const internalIds = shards
       .map(s => s.internal_id)
       .filter(id => id && id.trim() !== "");
-
-    const BATCH_SIZE = 25;
-    for (let i = 0; i < internalIds.length; i += BATCH_SIZE) {
-      const batch = internalIds.slice(i, i + BATCH_SIZE);
-      const results = await Promise.allSettled(
-        batch.map(async (id) => {
-          const resp = await fetch(`https://sky.coflnet.com/api/bazaar/${id}/snapshot`, {
-            headers: { "User-Agent": "SkyShards/1.0 (+https://github.com/lougio08/shard)" },
-          });
-          if (!resp.ok) return null;
-          const data = await resp.json();
-          return { id, data };
-        })
-      );
-
-      for (const result of results) {
-        if (result.status === "fulfilled" && result.value) {
-          const { id, data } = result.value;
-          const shard = shards.find(s => s.internal_id === id);
-          if (shard) {
-            prices[shard.id] = {
-              buyCost: data.buyPrice ?? 0,
-              sellRevenue: data.sellPrice ?? 0,
-              buyVolume: data.buyVolume ?? 0,
-              sellVolume: data.sellVolume ?? 0,
-              dailyBuyVolume: (data.buyMovingWeek ?? 0) / 7,
-              dailySellVolume: (data.sellMovingWeek ?? 0) / 7,
-            };
-          }
-        }
-      }
-
-      if (i + BATCH_SIZE < internalIds.length) {
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    }
-
+    const snapshots = await this._fetchCoflBazaarSnapshots(internalIds);
+    const prices = this._mapSnapshotsToPrices(shards, snapshots);
+    this._updateCoflCache(prices, null);
     return Object.keys(prices).length > 0 ? prices : null;
   }
 

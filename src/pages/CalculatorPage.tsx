@@ -119,7 +119,7 @@ const performCalculation = async (
       let cached = loadBazaarCache();
       if (!cached) {
         try {
-          const { prices } = await DataService.getInstance().fetchBazaarInfosWithOrders();
+          const { prices } = await DataService.getInstance().fetchCoflBazaarInfosWithOrders();
           saveBazaarCache(prices);
           cached = loadBazaarCache();
         } catch { /* ignore fetch errors */ }
@@ -265,7 +265,7 @@ const performCalculation = async (
     let cached = loadBazaarCache();
     if (!cached) {
       try {
-        const { prices } = await DataService.getInstance().fetchBazaarInfosWithOrders();
+        const { prices } = await DataService.getInstance().fetchCoflBazaarInfosWithOrders();
         saveBazaarCache(prices);
         cached = loadBazaarCache();
       } catch { /* ignore fetch errors */ }
@@ -424,7 +424,7 @@ const CalculatorPageContent: React.FC = () => {
   // Fetch bazaar price info when calculation data is available
   useEffect(() => {
     if (calculationData) {
-      DataService.getInstance().fetchBazaarInfosWithOrders().then(({ prices, orderBooks }) => {
+      DataService.getInstance().fetchCoflBazaarInfosWithOrders().then(({ prices, orderBooks }) => {
         setBazaarPrices(prices);
         saveBazaarCache(prices);
         const suspicious = detectSuspiciousOrderBookPrices(orderBooks);
@@ -437,7 +437,7 @@ const CalculatorPageContent: React.FC = () => {
 
   // Fetch bazaar data on mount so stable filter works on first calculation
   useEffect(() => {
-    DataService.getInstance().fetchBazaarInfosWithOrders().then(({ prices, orderBooks }) => {
+    DataService.getInstance().fetchCoflBazaarInfosWithOrders().then(({ prices, orderBooks }) => {
       setBazaarPrices(prices);
       saveBazaarCache(prices);
       const suspicious = detectSuspiciousOrderBookPrices(orderBooks);
@@ -591,7 +591,7 @@ const CalculatorPageContent: React.FC = () => {
         let cached = loadBazaarCache();
         if (!cached) {
           try {
-            const { prices } = await DataService.getInstance().fetchBazaarInfosWithOrders();
+            const { prices } = await DataService.getInstance().fetchCoflBazaarInfosWithOrders();
             saveBazaarCache(prices);
             cached = loadBazaarCache();
           } catch { /* ignore fetch errors */ }
