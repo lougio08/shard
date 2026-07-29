@@ -79,7 +79,11 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
     const priceInfo = bazaarPrices[shardId];
     // "Stable" = filtre volume : shards sous le seuil sont masquées
     if (filterLowVolume) {
-      if (!priceInfo) return { filtered: true, reason: "no price" };
+      if (!priceInfo) {
+        const hasRecipes = !!data.recipes[shardId]?.length;
+        if (hasRecipes) return { filtered: false, reason: "" };
+        return { filtered: true, reason: "no price" };
+      }
       if (priceInfo.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME || priceInfo.dailySellVolume < STABLE_MIN_DAILY_SELL_VOLUME) {
         return { filtered: true, reason: "volume" };
       }

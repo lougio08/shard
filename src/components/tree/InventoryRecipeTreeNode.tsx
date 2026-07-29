@@ -127,7 +127,11 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
       return { filtered: true, reason: "suspicious" };
     }
     if (filterLowVolume) {
-      if (!priceInfo) return { filtered: true, reason: "no price" };
+      if (!priceInfo) {
+        const hasRecipes = !!data.recipes[shardId]?.length;
+        if (hasRecipes) return { filtered: false, reason: "" };
+        return { filtered: true, reason: "no price" };
+      }
       if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME || priceInfo.dailySellVolume < MIN_SELL_VOLUME) {
         return { filtered: true, reason: "volume" };
       }
