@@ -130,17 +130,6 @@ export const ProfitabilityPage = () => {
   const previousPricesRef = useRef<Record<string, { buyCost: number; sellRevenue: number }> | null>(null);
   const backgroundFetchDoneRef = useRef(false);
 
-  const buildPriceInfo = useCallback((snapshot: { buyPrice: number; sellPrice: number; buyVolume?: number; sellVolume?: number; buyMovingWeek?: number; sellMovingWeek?: number }): PriceInfo => {
-    return {
-      buyCost: snapshot.sellPrice,
-      sellRevenue: snapshot.buyPrice,
-      buyVolume: snapshot.buyVolume ?? 0,
-      sellVolume: snapshot.sellVolume ?? 0,
-      dailyBuyVolume: (snapshot.buyMovingWeek ?? 0) > 0 ? snapshot.buyMovingWeek! / 7 : (snapshot.buyVolume ?? 0),
-      dailySellVolume: (snapshot.sellMovingWeek ?? 0) > 0 ? snapshot.sellMovingWeek! / 7 : (snapshot.sellVolume ?? 0),
-    };
-  }, []);
-
   const fetchPrices = useCallback(async () => {
     setError(null);
     const dataService = DataService.getInstance();
@@ -179,7 +168,7 @@ export const ProfitabilityPage = () => {
           if (info && info.buyCost > 0 && info.sellRevenue > 0) {
             newPrices[shard.id] = info;
             freshShardIds.add(shard.id);
-            currentPriceSnapshot[shard.id] = { buyCost: info.sellRevenue, sellRevenue: info.buyCost };
+            currentPriceSnapshot[shard.id] = { buyCost: info.buyCost, sellRevenue: info.sellRevenue };
           }
         }
       }
@@ -204,7 +193,7 @@ export const ProfitabilityPage = () => {
     } finally {
       setPriceLoading(false);
     }
-  }, [buildPriceInfo]);
+  }, []);
 
   useEffect(() => {
     fetchPrices();

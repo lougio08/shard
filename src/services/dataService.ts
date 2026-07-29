@@ -10,6 +10,7 @@ interface FusionData {
 interface BazaarCache {
   data: Record<string, number>;
   timestamp: number;
+  useInstantBuyPrices: boolean;
 }
 
 interface HypixelOrderBookEntry {
@@ -104,7 +105,7 @@ export class DataService {
 
   async loadShardCosts(useInstantBuyPrices: boolean): Promise<Record<string, number>> {
     const now = Date.now();
-    if (this.bazaarPriceCache && now - this.bazaarPriceCache.timestamp < this.BAZAAR_CACHE_TTL) {
+    if (this.bazaarPriceCache && now - this.bazaarPriceCache.timestamp < this.BAZAAR_CACHE_TTL && this.bazaarPriceCache.useInstantBuyPrices === useInstantBuyPrices) {
       return this.bazaarPriceCache.data;
     }
 
@@ -115,14 +116,14 @@ export class DataService {
       for (const shard of shards) {
         const product = products[shard.internal_id];
         if (product?.quick_status) {
-          costs[shard.id] = useInstantBuyPrices ? product.quick_status.buyPrice : product.quick_status.sellPrice;
+          costs[shard.id] = useInstantBuyPrices ? product.quick_status.sellPrice : product.quick_status.buyPrice;
         }
       }
 
-      this.bazaarPriceCache = { data: costs, timestamp: now };
+      this.bazaarPriceCache = { data: costs, timestamp: now, useInstantBuyPrices };
       return costs;
     } catch (error) {
-      if (this.bazaarPriceCache) {
+      if (this.bazaarPriceCache && this.bazaarPriceCache.useInstantBuyPrices === useInstantBuyPrices) {
         return this.bazaarPriceCache.data;
       }
       return {};
