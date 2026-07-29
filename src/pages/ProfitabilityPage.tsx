@@ -128,6 +128,7 @@ export const ProfitabilityPage = () => {
   const [staleShardIds, setStaleShardIds] = useState<Set<string>>(new Set());
   const [suspiciousPriceShards, setSuspiciousPriceShards] = useState<Set<string>>(new Set());
   const previousPricesRef = useRef<Record<string, { buyCost: number; sellRevenue: number }> | null>(null);
+  const pricesRef = useRef<Record<string, PriceInfo> | null>(null);
   const backgroundFetchDoneRef = useRef(false);
 
   const fetchPrices = useCallback(async () => {
@@ -151,6 +152,7 @@ export const ProfitabilityPage = () => {
         previousPricesRef.current = currentPriceSnapshot;
         setStaleShardIds(new Set(Object.keys(cachedPrices)));
         setPrices(cachedPrices);
+        pricesRef.current = cachedPrices;
         setPriceLoading(false);
       }
     }
@@ -172,19 +174,34 @@ export const ProfitabilityPage = () => {
           }
         }
       }
-      previousPricesRef.current = currentPriceSnapshot;
 
-      // Determine stale shards: shards that exist in fusionData but not in fresh fetch
+      // Capture previous prices for stale detection and merge
+      const prevPriceData = pricesRef.current;
+
+      // Merge: keep previous prices for shards not refreshed, replace with fresh data otherwise
+      const mergedPrices: Record<string, PriceInfo> = { ...(prevPriceData ?? {}) };
+      for (const [id, info] of Object.entries(newPrices)) {
+        mergedPrices[id] = info;
+      }
+
+      // Determine stale shards: shards that existed before but weren't refreshed
       const stale = new Set<string>();
       for (const shard of shards) {
-        if (!freshShardIds.has(shard.id) && newPrices[shard.id]) {
+        if (!freshShardIds.has(shard.id) && prevPriceData?.[shard.id]) {
           stale.add(shard.id);
         }
       }
 
       setStaleShardIds(stale);
-      setPrices(newPrices);
-      saveBazaarCache(newPrices);
+      setPrices(mergedPrices);
+      pricesRef.current = mergedPrices;
+      previousPricesRef.current = currentPriceSnapshot;
+
+      // Only save to cache if we got meaningful fresh data (don't overwrite valid cache with empty)
+      if (Object.keys(newPrices).length > 0) {
+        saveBazaarCache(mergedPrices);
+      }
+
       backgroundFetchDoneRef.current = true;
     } catch (err) {
       if (!backgroundFetchDoneRef.current) {
@@ -198,6 +215,11 @@ export const ProfitabilityPage = () => {
   useEffect(() => {
     fetchPrices();
   }, [fetchPrices]);
+
+  // Keep pricesRef in sync with prices state (needed inside fetchPrices closure)
+  useEffect(() => {
+    pricesRef.current = prices;
+  }, [prices]);
 
   useEffect(() => {
     if (!fusionData || !prices || fusionLoading || priceLoading) return;

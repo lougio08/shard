@@ -293,8 +293,8 @@ export class DataService {
           const shard = shards.find(s => s.internal_id === id);
           if (shard) {
             prices[shard.id] = {
-              buyCost: data.buy ?? 0,
-              sellRevenue: data.sell ?? 0,
+              buyCost: data.buyPrice ?? 0,
+              sellRevenue: data.sellPrice ?? 0,
               buyVolume: data.buyVolume ?? 0,
               sellVolume: data.sellVolume ?? 0,
               dailyBuyVolume: (data.buyMovingWeek ?? 0) / 7,
