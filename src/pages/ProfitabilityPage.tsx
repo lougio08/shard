@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, TrendingDown, BarChart3, RefreshCw, AlertCircle, Info, ShieldCheck, ShieldX, AlertTriangle, Hammer, Clock } from "lucide-react";
 import { useFusionData } from "../hooks";
-import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectPriceAnomaly, collectTreeShardIds } from "../utilities";
-import { applyStableFilter, getUnstableShardIds, STABLE_MIN_DAILY_BUY_VOLUME, isLowSellVolume, MIN_SELL_VOLUME } from "../utilities/stableFilter";
+import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectPriceAnomaly, collectTreeShardIds, getTreeBuyNodes } from "../utilities";
+import { STABLE_MIN_DAILY_BUY_VOLUME, isLowSellVolume, MIN_SELL_VOLUME } from "../utilities/stableFilter";
 import { DataService } from "../services/dataService";
 import { CalculationService } from "../services/calculationService";
 import { RecipeTreeNode } from "../components/tree";
@@ -242,13 +242,6 @@ export const ProfitabilityPage = () => {
         const params = DEFAULT_CALCULATION_PARAMS;
         const service = CalculationService.getInstance();
 
-        if (filterLowVolume) {
-          const excludedIds = getUnstableShardIds(currentPrices);
-          if (excludedIds.size > 0) {
-            data = applyStableFilter(data, excludedIds);
-          }
-        }
-
         const { choices, minCosts } = service.computeMinCosts(data, params);
         const cycleNodes = service.findCycleNodes(choices);
         const minCostsCache = { minCosts, choices };
@@ -279,7 +272,16 @@ export const ProfitabilityPage = () => {
             }
           }
 
-          const volumeOk = priceInfo.dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+          const leafShards = effectiveTree ? getTreeBuyNodes(effectiveTree) : [];
+          const lowVolumeShards: string[] = [];
+          for (const leafId of leafShards) {
+            const leafPrice = currentPrices[leafId];
+            if (leafPrice && (leafPrice.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME || leafPrice.dailySellVolume < MIN_SELL_VOLUME)) {
+              lowVolumeShards.push(leafId);
+            }
+          }
+          const outVolumeOk = priceInfo.dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+          const volumeOk = outVolumeOk && lowVolumeShards.length === 0;
 
           shardBases.push({
             shardId,
@@ -291,7 +293,7 @@ export const ProfitabilityPage = () => {
             craftsNeeded: entryCraftsNeeded,
             volumeOk,
             volatileOk: true,
-            lowVolumeShards: [],
+            lowVolumeShards,
             volatileShards: [],
           });
         }

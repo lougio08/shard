@@ -1,4 +1,4 @@
-import type { Data, Shards, Recipes, RecipeTree } from "../types/types";
+import type { Data, Shards, RecipeTree } from "../types/types";
 
 export const STABLE_MIN_DAILY_BUY_VOLUME = 5000;
 export const STABLE_MIN_DAILY_SELL_VOLUME = 5000;
@@ -19,17 +19,7 @@ export function applyStableFilter(
     filteredShards[id] = isExcluded ? { ...shard, rate: 0 } : shard;
   }
 
-  const filteredRecipes: Recipes = {};
-  for (const [output, recipeList] of Object.entries(data.recipes)) {
-    filteredRecipes[output] = recipeList.filter((recipe) => {
-      const [input1, input2] = recipe.inputs;
-      const input1Excluded = excludedShardIds.has(input1) && input1 !== keepShardId;
-      const input2Excluded = excludedShardIds.has(input2) && input2 !== keepShardId;
-      return !input1Excluded && !input2Excluded;
-    });
-  }
-
-  return { shards: filteredShards, recipes: filteredRecipes };
+  return { shards: filteredShards, recipes: data.recipes };
 }
 
 export function getUnstableShardIds(
