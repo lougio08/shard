@@ -181,17 +181,12 @@ export const RecipePage = () => {
       let data = buildDataFromFusionData(fusionData, defaultRates);
 
       const prices: Record<string, PriceInfo> = {};
-      for (const shard of shards) {
-        const snapshot = skyCoflPrices[shard.id];
-        if (snapshot && snapshot.buyPrice > 0 && snapshot.sellPrice > 0) {
-          prices[shard.id] = {
-            buyCost: snapshot.sellPrice,
-            sellRevenue: snapshot.buyPrice,
-            buyVolume: snapshot.buyVolume ?? 0,
-            sellVolume: snapshot.sellVolume ?? 0,
-            dailyBuyVolume: (snapshot.buyMovingWeek ?? 0) > 0 ? snapshot.buyMovingWeek / 7 : (snapshot.buyVolume ?? 0),
-            dailySellVolume: (snapshot.sellMovingWeek ?? 0) > 0 ? snapshot.sellMovingWeek / 7 : (snapshot.sellVolume ?? 0),
-          };
+      if (skyCoflPrices) {
+        for (const shard of shards) {
+          const info = skyCoflPrices[shard.id];
+          if (info && info.buyCost > 0 && info.sellRevenue > 0) {
+            prices[shard.id] = info;
+          }
         }
       }
 

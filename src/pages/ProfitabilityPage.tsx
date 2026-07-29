@@ -173,12 +173,14 @@ export const ProfitabilityPage = () => {
       const newPrices: Record<string, PriceInfo> = {};
       const freshShardIds = new Set<string>();
       const currentPriceSnapshot: Record<string, { buyCost: number; sellRevenue: number }> = {};
-      for (const shard of shards) {
-        const snapshot = skyCoflPrices[shard.id];
-        if (snapshot && snapshot.buyPrice > 0 && snapshot.sellPrice > 0) {
-          newPrices[shard.id] = buildPriceInfo(snapshot);
-          freshShardIds.add(shard.id);
-          currentPriceSnapshot[shard.id] = { buyCost: snapshot.sellPrice, sellRevenue: snapshot.buyPrice };
+      if (skyCoflPrices) {
+        for (const shard of shards) {
+          const info = skyCoflPrices[shard.id];
+          if (info && info.buyCost > 0 && info.sellRevenue > 0) {
+            newPrices[shard.id] = info;
+            freshShardIds.add(shard.id);
+            currentPriceSnapshot[shard.id] = { buyCost: info.sellRevenue, sellRevenue: info.buyCost };
+          }
         }
       }
       previousPricesRef.current = currentPriceSnapshot;

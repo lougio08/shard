@@ -63,10 +63,12 @@ export function calculateOptimalPathWithWorker(
   keepShardId?: string
 ): { promise: Promise<{ result: CalculationResult; parsedData: Data }>; cancel: () => void } {
   const worker = new Worker(new URL("../workers/calculationWorker.ts", import.meta.url), { type: "module" });
+
   let cancelled = false;
 
   const promise = new Promise<{ result: CalculationResult; parsedData: Data }>((resolve, reject) => {
     worker.onmessage = (event: MessageEvent<WorkerMsg>) => {
+      if (cancelled) return;
       const data = event.data;
       if (!data || !("type" in data)) return;
       if (data.type === "progress") {
@@ -117,6 +119,7 @@ export function calculateInventoryWithWorker(
   keepShardId?: string
 ): { promise: Promise<{ result: InventoryCalculationResult; parsedData: Data }>; cancel: () => void } {
   const worker = new Worker(new URL("../workers/calculationWorker.ts", import.meta.url), { type: "module" });
+
   let cancelled = false;
 
   const promise = new Promise<{ result: InventoryCalculationResult; parsedData: Data }>((resolve, reject) => {
@@ -126,6 +129,7 @@ export function calculateInventoryWithWorker(
     ownedAttributes.forEach((value, key) => { ownedAttributesObj[key] = value; });
 
     worker.onmessage = (event: MessageEvent<InventoryWorkerMsg>) => {
+      if (cancelled) return;
       const data = event.data;
       if (!data || !("type" in data)) return;
       if (data.type === "progress") {
