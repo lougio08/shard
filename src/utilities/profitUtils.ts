@@ -171,6 +171,54 @@ export function isStableVolume(dailyBuyVolume: number): boolean {
   return dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME;
 }
 
+export const MAT_CACHE_MAX_DEPTH = 30;
+
+export function getCraftableMatPrice(
+  shardId: string,
+  prices: Record<string, PriceInfo>,
+  data: Data,
+  buyMode: "order" | "instant",
+  visited: Set<string>,
+  cache: Map<string, number | undefined>,
+  _depth = 0
+): number | undefined {
+  const cacheKey = `${buyMode}:${shardId}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const priceInfo = prices[shardId];
+  const price = priceInfo ? (buyMode === "instant" ? priceInfo.sellRevenue : priceInfo.buyCost) : undefined;
+  if (price !== undefined && price !== null && price > 0 && isFinite(price)) {
+    cache.set(cacheKey, price);
+    return price;
+  }
+
+  if (visited.has(shardId) || _depth >= MAT_CACHE_MAX_DEPTH) {
+    cache.set(cacheKey, undefined);
+    return undefined;
+  }
+
+  const recipes = data.recipes[shardId];
+  if (!recipes || recipes.length === 0) {
+    cache.set(cacheKey, undefined);
+    return undefined;
+  }
+
+  visited.add(shardId);
+  let bestCost: number | undefined;
+  for (const recipe of recipes) {
+    const cost1 = getCraftableMatPrice(recipe.inputs[0], prices, data, buyMode, visited, cache, _depth + 1);
+    const cost2 = getCraftableMatPrice(recipe.inputs[1], prices, data, buyMode, visited, cache, _depth + 1);
+    if (cost1 !== undefined && cost2 !== undefined) {
+      const total = cost1 + cost2;
+      if (bestCost === undefined || total < bestCost) bestCost = total;
+    }
+  }
+  visited.delete(shardId);
+
+  cache.set(cacheKey, bestCost);
+  return bestCost;
+}
+
 export function collectTreeShardIds(
   tree: RecipeTree,
   shards: Record<string, Shard>,

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ShardAutocomplete, RecipeCountBadge, SearchFilterInput, ShardDisplay, DropdownButton } from "../components";
-import { getRarityColor, formatLargeNumber, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData } from "../utilities";
+import { getRarityColor, formatLargeNumber, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, getCraftableMatPrice } from "../utilities";
 import { applyStableFilter, getUnstableShardIds, isLowSellVolume } from "../utilities/stableFilter";
 import { useFusionData, useDropdownManager, useRecipeState } from "../hooks";
 import { processOutputRecipes, categorizeAndGroupRecipes, filterCategorizedRecipes, type Recipe, type CategorizedRecipes, type GroupedRecipe, type FusionData } from "../utilities";
@@ -83,7 +83,7 @@ export const RecipePage = () => {
     const service = CalculationService.getInstance();
 
     if (filterLowVolume) {
-      const excludedIds = getUnstableShardIds(prices);
+      const excludedIds = getUnstableShardIds(prices, data.recipes);
       if (excludedIds.size > 0) {
         data = applyStableFilter(data, excludedIds);
       }
@@ -102,6 +102,8 @@ export const RecipePage = () => {
       sellRevenue: number;
     } | null = null;
 
+    const matPriceCache = new Map<string, number | undefined>();
+
     for (const [outputShardId] of Object.entries(fusionData.recipes)) {
       const priceInfo = prices[outputShardId];
       if (!priceInfo) continue;
@@ -113,7 +115,7 @@ export const RecipePage = () => {
       if (!choice || choice.recipe === null) continue;
 
       const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-      const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache);
+      const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache, { nodeCount: 0 });
       service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
       const stats = service.collectTreeStats(tree, params);
 
@@ -121,7 +123,10 @@ export const RecipePage = () => {
       let allMaterialsPriced = true;
       stats.totalQuantities.forEach((qty, matId) => {
         const matPriceInfo = prices[matId];
-        const matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+        let matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+        if (matPrice === undefined || matPrice === null || matPrice <= 0) {
+          matPrice = getCraftableMatPrice(matId, prices, data, buyMode, new Set(), matPriceCache);
+        }
         if (matPrice === undefined || matPrice === null || matPrice <= 0) {
           allMaterialsPriced = false;
         }
@@ -199,7 +204,7 @@ export const RecipePage = () => {
       cachedShardRef.current = shard.key;
 
       if (filterLowVolume) {
-        const excludedIds = getUnstableShardIds(prices);
+        const excludedIds = getUnstableShardIds(prices, data.recipes);
         if (excludedIds.size > 0) {
           data = applyStableFilter(data, excludedIds);
         }
@@ -222,6 +227,8 @@ export const RecipePage = () => {
         sellRevenue: number;
       } | null = null;
 
+      const matPriceCache = new Map<string, number | undefined>();
+
       for (const [outputShardId] of Object.entries(fusionData.recipes)) {
         const priceInfo = prices[outputShardId];
         if (!priceInfo) continue;
@@ -233,7 +240,7 @@ export const RecipePage = () => {
         if (!choice || choice.recipe === null) continue;
 
         const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-        const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache);
+        const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache, { nodeCount: 0 });
         service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
         const stats = service.collectTreeStats(tree, params);
 
@@ -241,7 +248,10 @@ export const RecipePage = () => {
         let allMaterialsPriced = true;
         stats.totalQuantities.forEach((qty, matId) => {
           const matPriceInfo = prices[matId];
-          const matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+          let matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
+          if (matPrice === undefined || matPrice === null || matPrice <= 0) {
+            matPrice = getCraftableMatPrice(matId, prices, data, buyMode, new Set(), matPriceCache);
+          }
           if (matPrice === undefined || matPrice === null || matPrice <= 0) {
             allMaterialsPriced = false;
           }
