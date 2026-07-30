@@ -126,10 +126,10 @@ export class DataService {
       const snap = snapshots.get(shard.internal_id);
       if (snap) {
         prices[shard.id] = {
-          // Coflnet: buyPrice = buy orders (bid, lower), sellPrice = sell orders (ask, higher)
-          // buyCost (Buy Order) = buyPrice ; sellRevenue (Sell Order) = sellPrice
-          buyCost: snap.buyPrice,
-          sellRevenue: snap.sellPrice,
+          // Vérifié empiriquement contre les prix en jeu : pour cet endpoint Coflnet,
+          // buyCost (coût achat) = snap.sellPrice, sellRevenue (revenu vente) = snap.buyPrice
+          buyCost: snap.sellPrice,
+          sellRevenue: snap.buyPrice,
           buyVolume: snap.buyVolume,
           sellVolume: snap.sellVolume,
           dailyBuyVolume: snap.buyMovingWeek / 7,

@@ -10,6 +10,74 @@ import type { RecipeTree, PriceInfo, Data, RecipeChoice } from "../types/types";
 
 const MAT_CACHE_MAX_DEPTH = 30;
 
+function debugShardExclusion(
+  targetShardId: string,
+  prices: Record<string, PriceInfo>,
+  shardBases: ShardBase[],
+  filterLowVolume: boolean
+): void {
+  console.group(`[Debug] ${targetShardId}`);
+  const priceInfo = prices[targetShardId];
+  if (!priceInfo) { console.log("EXCLUDED: no price in currentPrices"); console.groupEnd(); return; }
+  console.log("buyCost:", priceInfo.buyCost, "sellRevenue:", priceInfo.sellRevenue);
+  console.log("dailyBuyVolume:", priceInfo.dailyBuyVolume, "dailySellVolume:", priceInfo.dailySellVolume);
+
+  if (filterLowVolume && isLowSellVolume(priceInfo)) {
+    console.log(`EXCLUDED: isLowSellVolume (dailySellVolume ${priceInfo.dailySellVolume} < ${MIN_SELL_VOLUME})`);
+    console.groupEnd();
+    return;
+  }
+
+  const base = shardBases.find(b => b.shardId === targetShardId);
+  if (!base) { console.log("EXCLUDED: no ShardBase entry"); console.groupEnd(); return; }
+  console.log("volumeOk:", base.volumeOk, "lowVolumeShards:", base.lowVolumeShards);
+  console.log("tree:", !!base.tree, "totalQuantities:", base.totalQuantities?.size);
+
+  // Simulate computeEntriesForMode + filter for default mode (order/order/craft)
+  const buyCost = priceInfo.buyCost;
+  const sellRevenue = priceInfo.sellRevenue;
+  if (buyCost <= 0 || sellRevenue <= 0 || !isFinite(buyCost) || !isFinite(sellRevenue)) {
+    console.log("EXCLUDED: buyCost/sellRevenue invalid (<=0 or non-finite)");
+    console.groupEnd();
+    return;
+  }
+
+  if (base.totalQuantities && base.totalQuantities.size > 0) {
+    console.log("--- Craft cost check ---");
+    let totalMatCost = 0;
+    let allPriced = true;
+    let firstUnpriced = "";
+    base.totalQuantities.forEach((qty, matId) => {
+      const mp = prices[matId];
+      const matPrice = mp ? mp.buyCost : undefined;
+      if (!matPrice || matPrice <= 0 || !isFinite(matPrice)) {
+        if (!firstUnpriced) firstUnpriced = `${matId} (price=${matPrice})`;
+        allPriced = false;
+      }
+      totalMatCost += qty * (matPrice ?? 0);
+    });
+    if (!allPriced) {
+      console.log(`EXCLUDED: material not priced — first: ${firstUnpriced}`);
+    } else {
+      console.log("craftCost:", totalMatCost);
+      const rev = sellRevenue * base.outputQty;
+      const profit = rev - totalMatCost;
+      console.log("sellRevenue * outputQty:", rev);
+      console.log("profit:", profit);
+      if (profit <= 0) console.log("EXCLUDED: craft profit <= 0");
+      else console.log("WOULD BE VISIBLE if in top 10");
+    }
+  } else {
+    const profit = sellRevenue - buyCost;
+    console.log("--- Flip check ---");
+    console.log("profit (flip):", profit);
+    if (profit <= 0) console.log("EXCLUDED: flip profit <= 0");
+    else console.log("WOULD BE VISIBLE if in top 10");
+  }
+
+  console.groupEnd();
+}
+
 function getCraftableMatPrice(
   shardId: string,
   prices: Record<string, PriceInfo>,
@@ -376,6 +444,12 @@ export const ProfitabilityPage = () => {
   useEffect(() => {
     if (heavyDataVersion === 0 || !heavyDataRef.current || !prices) return;
 
+    const urlParams = new URLSearchParams(window.location.search);
+    const debugShard = urlParams.get("debugShard");
+    if (debugShard) {
+      debugShardExclusion(debugShard, prices, heavyDataRef.current.shardBases, filterLowVolume);
+    }
+
     if (cacheBuiltForRef.current.version !== heavyDataVersion || cacheBuiltForRef.current.prices !== prices) {
       const { shardBases, data } = heavyDataRef.current;
       const priceCache = new Map<string, number | undefined>();
@@ -407,6 +481,20 @@ export const ProfitabilityPage = () => {
     filtered.sort((a, b) => (sortBy === "profit" ? b.profit - a.profit : b.margin - a.margin));
 
     const top10 = filtered.slice(0, 10);
+
+    if (debugShard) {
+      const rank = filtered.findIndex(e => e.shardId === debugShard);
+      if (rank >= 0) {
+        const entry = filtered[rank];
+        if (rank >= 10) {
+          console.log(`[Debug] ${debugShard} rank ${rank + 1}/${filtered.length} — OUTSIDE top 10 (profit: ${entry.profit}, craftCost: ${entry.craftCost}, margin: ${entry.margin}%)`);
+        } else {
+          console.log(`[Debug] ${debugShard} rank ${rank + 1}/${filtered.length} — VISIBLE in top 10 (profit: ${entry.profit}, craftCost: ${entry.craftCost}, margin: ${entry.margin}%)`);
+        }
+      } else {
+        console.log(`[Debug] ${debugShard} NOT FOUND in filtered entries (${filtered.length} total) — excluded by filter (craftCost/finite/profit check)`);
+      }
+    }
 
     const newExpanded = new Map<string, boolean>();
     const initExpansion = (tree: RecipeTree, id: string) => {
