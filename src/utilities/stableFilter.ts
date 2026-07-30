@@ -23,10 +23,15 @@ export function applyStableFilter(
 }
 
 export function getUnstableShardIds(
-  prices: Record<string, { dailyBuyVolume: number; dailySellVolume?: number }>
+  prices: Record<string, { dailyBuyVolume: number; dailySellVolume?: number }>,
+  recipes?: Record<string, { length: number }>
 ): Set<string> {
   const excluded = new Set<string>();
   for (const [shardId, price] of Object.entries(prices)) {
+    if (recipes) {
+      const hasRecipe = (recipes[shardId]?.length ?? 0) > 0;
+      if (hasRecipe) continue;
+    }
     const buyVol = price.dailyBuyVolume ?? 0;
     const sellVol = price.dailySellVolume ?? 0;
     if (buyVol < STABLE_MIN_DAILY_BUY_VOLUME || sellVol < STABLE_MIN_DAILY_SELL_VOLUME) {

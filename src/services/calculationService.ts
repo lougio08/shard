@@ -799,6 +799,9 @@ export class CalculationService {
     return Array.from(inputTotals.values());
   }
 
+  private TREE_MAX_DEPTH = 20;
+  private TREE_MAX_NODES = 5000;
+
   public buildRecipeTree(
     data: Data,
     shard: string,
@@ -806,8 +809,21 @@ export class CalculationService {
     cycleNodes: string[][],
     params: CalculationParams,
     recipeOverrides: RecipeOverride[] = [],
-    minCostsCache?: { minCosts: Map<string, number>; choices: Map<string, RecipeChoice> }
+    minCostsCache?: { minCosts: Map<string, number>; choices: Map<string, RecipeChoice> },
+    _treeGuard?: { nodeCount: number; maxNodes?: number; maxDepth?: number },
+    _depth = 0
   ): RecipeTree {
+    const guard = _treeGuard;
+    if (guard) {
+      const maxNodes = guard.maxNodes ?? this.TREE_MAX_NODES;
+      const maxDepth = guard.maxDepth ?? this.TREE_MAX_DEPTH;
+      if (_depth >= maxDepth || guard.nodeCount >= maxNodes) {
+        console.warn(`[buildRecipeTree] Tree limit reached: ${shard} (depth=${_depth}, nodes=${guard.nodeCount})`);
+        return { shard, method: "direct", quantity: 0 };
+      }
+      guard.nodeCount++;
+    }
+
     if (!minCostsCache) {
       const memoKey = `${params.craftPenalty}|${params.rateAsCoinValue}`;
       const memo = this.buildTreeMinCostCache.get(data);
@@ -851,7 +867,9 @@ export class CalculationService {
         [],
         params,
         recipeOverrides,
-        minCostsCache
+        minCostsCache,
+        guard,
+        _depth + 1
       );
       const craftCounter = { total: 0 };
       this.assignQuantities(
@@ -875,7 +893,9 @@ export class CalculationService {
           [],
           params,
           recipeOverrides,
-          minCostsCache
+          minCostsCache,
+          guard,
+          _depth + 1
         );
         cycleInputs.push(extTree);
       }
@@ -905,7 +925,9 @@ export class CalculationService {
         cycleNodes,
         params,
         recipeOverrides,
-        minCostsCache
+        minCostsCache,
+        guard,
+        _depth + 1
       );
       const tree2 = this.buildRecipeTree(
         data,
@@ -914,7 +936,9 @@ export class CalculationService {
         cycleNodes,
         params,
         recipeOverrides,
-        minCostsCache
+        minCostsCache,
+        guard,
+        _depth + 1
       );
 
       return {

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, TrendingDown, BarChart3, RefreshCw, AlertCircle, Info, ShieldCheck, ShieldX, AlertTriangle, Hammer, Clock } from "lucide-react";
 import { useFusionData } from "../hooks";
 import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectPriceAnomaly, collectTreeShardIds, getTreeBuyNodes } from "../utilities";
-import { STABLE_MIN_DAILY_BUY_VOLUME, isLowSellVolume, MIN_SELL_VOLUME } from "../utilities/stableFilter";
+import { STABLE_MIN_DAILY_BUY_VOLUME, isLowSellVolume, MIN_SELL_VOLUME, getUnstableShardIds, applyStableFilter } from "../utilities/stableFilter";
 import { DataService } from "../services/dataService";
 import { CalculationService } from "../services/calculationService";
 import { RecipeTreeNode } from "../components/tree";
@@ -278,6 +278,13 @@ export const ProfitabilityPage = () => {
 
         if (cancelled) return;
 
+        if (filterLowVolume) {
+          const excludedIds = getUnstableShardIds(currentPrices, data.recipes);
+          if (excludedIds.size > 0) {
+            data = applyStableFilter(data, excludedIds);
+          }
+        }
+
         const params = DEFAULT_CALCULATION_PARAMS;
         const service = CalculationService.getInstance();
 
@@ -287,6 +294,7 @@ export const ProfitabilityPage = () => {
 
         if (cancelled) return;
 
+        const treeGuard = { nodeCount: 0 };
         const shardBases: ShardBase[] = [];
         for (const [shardId, shard] of Object.entries(shardData)) {
           const priceInfo = currentPrices[shardId];
@@ -302,7 +310,7 @@ export const ProfitabilityPage = () => {
             const choice = choices.get(shardId);
             if (choice && choice.recipe !== null) {
               entryOutputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-              const tree = service.buildRecipeTree(data, shardId, choices, cycleNodes, params, [], minCostsCache);
+              const tree = service.buildRecipeTree(data, shardId, choices, cycleNodes, params, [], minCostsCache, treeGuard);
               service.assignQuantities(tree, entryOutputQty, data, { total: 0 }, choices, 1, params);
               effectiveTree = tree;
               const stats = service.collectTreeStats(tree, params);
