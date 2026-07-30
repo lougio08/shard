@@ -294,7 +294,6 @@ export const ProfitabilityPage = () => {
 
         if (cancelled) return;
 
-        const treeGuard = { nodeCount: 0 };
         const shardBases: ShardBase[] = [];
         for (const [shardId, shard] of Object.entries(shardData)) {
           const priceInfo = currentPrices[shardId];
@@ -310,7 +309,7 @@ export const ProfitabilityPage = () => {
             const choice = choices.get(shardId);
             if (choice && choice.recipe !== null) {
               entryOutputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-              const tree = service.buildRecipeTree(data, shardId, choices, cycleNodes, params, [], minCostsCache, treeGuard);
+              const tree = service.buildRecipeTree(data, shardId, choices, cycleNodes, params, [], minCostsCache, { nodeCount: 0 });
               service.assignQuantities(tree, entryOutputQty, data, { total: 0 }, choices, 1, params);
               effectiveTree = tree;
               const stats = service.collectTreeStats(tree, params);
