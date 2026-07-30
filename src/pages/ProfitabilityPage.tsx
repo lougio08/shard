@@ -15,7 +15,6 @@ function getCraftableMatPrice(
   prices: Record<string, PriceInfo>,
   data: Data,
   buyMode: "order" | "instant",
-  choices: Map<string, RecipeChoice>,
   visited: Set<string>,
   cache: Map<string, number | undefined>,
   _depth = 0
@@ -35,20 +34,26 @@ function getCraftableMatPrice(
     return undefined;
   }
 
-  const chosenRecipe = choices.get(shardId)?.recipe;
-  if (!chosenRecipe) {
+  const recipes = data.recipes[shardId];
+  if (!recipes || recipes.length === 0) {
     cache.set(cacheKey, undefined);
     return undefined;
   }
 
   visited.add(shardId);
-  const cost1 = getCraftableMatPrice(chosenRecipe.inputs[0], prices, data, buyMode, choices, visited, cache, _depth + 1);
-  const cost2 = getCraftableMatPrice(chosenRecipe.inputs[1], prices, data, buyMode, choices, visited, cache, _depth + 1);
+  let bestCost: number | undefined;
+  for (const recipe of recipes) {
+    const cost1 = getCraftableMatPrice(recipe.inputs[0], prices, data, buyMode, visited, cache, _depth + 1);
+    const cost2 = getCraftableMatPrice(recipe.inputs[1], prices, data, buyMode, visited, cache, _depth + 1);
+    if (cost1 !== undefined && cost2 !== undefined) {
+      const total = cost1 + cost2;
+      if (bestCost === undefined || total < bestCost) bestCost = total;
+    }
+  }
   visited.delete(shardId);
 
-  const total = (cost1 !== undefined && cost2 !== undefined) ? cost1 + cost2 : undefined;
-  cache.set(cacheKey, total);
-  return total;
+  cache.set(cacheKey, bestCost);
+  return bestCost;
 }
 
 interface ProfitEntry {
@@ -86,7 +91,6 @@ function computeEntriesForMode(
   sellMode: "order" | "instant",
   viewMode: "craft" | "flip",
   data: Data,
-  choices: Map<string, RecipeChoice>,
   priceCache: Map<string, number | undefined>
 ): ProfitEntry[] {
   const entries: ProfitEntry[] = [];
@@ -113,7 +117,7 @@ function computeEntriesForMode(
           const matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
           let effectivePrice = matPrice;
           if (matPrice === undefined || matPrice === null || matPrice <= 0) {
-            effectivePrice = getCraftableMatPrice(matId, prices, data, buyMode, choices, new Set(), priceCache);
+            effectivePrice = getCraftableMatPrice(matId, prices, data, buyMode, new Set(), priceCache);
           }
           if (effectivePrice === undefined || effectivePrice === null || effectivePrice <= 0 || !isFinite(effectivePrice)) {
             allMaterialsPriced = false;
@@ -373,7 +377,7 @@ export const ProfitabilityPage = () => {
     if (heavyDataVersion === 0 || !heavyDataRef.current || !prices) return;
 
     if (cacheBuiltForRef.current.version !== heavyDataVersion || cacheBuiltForRef.current.prices !== prices) {
-      const { shardBases, data, choices } = heavyDataRef.current;
+      const { shardBases, data } = heavyDataRef.current;
       const priceCache = new Map<string, number | undefined>();
       const cache = new Map<string, ProfitEntry[]>();
       const modes: Array<["order" | "instant", "order" | "instant", "craft" | "flip"]> = [
@@ -383,7 +387,7 @@ export const ProfitabilityPage = () => {
         ["instant", "instant", "craft"], ["instant", "instant", "flip"],
       ];
       for (const [bm, sm, vm] of modes) {
-        cache.set(`${bm}-${sm}-${vm}`, computeEntriesForMode(shardBases, prices, bm, sm, vm, data, choices, priceCache));
+        cache.set(`${bm}-${sm}-${vm}`, computeEntriesForMode(shardBases, prices, bm, sm, vm, data, priceCache));
       }
       entriesCacheRef.current = cache;
       priceCacheRef.current = priceCache;
@@ -765,8 +769,7 @@ export const ProfitabilityPage = () => {
                         const qty = origQty * numCrafts;
                         let price = buyMode === "instant" ? prices?.[matId]?.sellRevenue : prices?.[matId]?.buyCost;
                         if (price === undefined || price === null || price <= 0) {
-                          const displayChoices = heavyDataRef.current?.choices;
-                          price = getCraftableMatPrice(matId, prices ?? {}, treeData, buyMode, displayChoices ?? new Map(), new Set(), priceCacheRef.current);
+                          price = getCraftableMatPrice(matId, prices ?? {}, treeData, buyMode, new Set(), priceCacheRef.current);
                         }
                         if (price === undefined || price === null || price <= 0) {
                           displayAllPriced = false;
@@ -813,7 +816,7 @@ export const ProfitabilityPage = () => {
                                     {(() => {
                                       const displayPrice = shardPrice
                                         ? (buyMode === "instant" ? shardPrice.sellRevenue : shardPrice.buyCost)
-                                        : getCraftableMatPrice(shardId, prices ?? {}, treeData!, buyMode, heavyDataRef.current?.choices ?? new Map(), new Set(), priceCacheRef.current);
+                                        : getCraftableMatPrice(shardId, prices ?? {}, treeData!, buyMode, new Set(), priceCacheRef.current);
                                       return displayPrice && displayPrice > 0 ? (
                                         <span className="text-slate-500 ml-auto flex-shrink-0">{formatLargeNumber(qty * displayPrice)}</span>
                                       ) : (
