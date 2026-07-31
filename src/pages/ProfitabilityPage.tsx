@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, TrendingDown, BarChart3, RefreshCw, AlertCircle, Info, ShieldCheck, ShieldX, AlertTriangle, Hammer, Clock } from "lucide-react";
 import { useFusionData } from "../hooks";
 import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectPriceAnomaly, collectTreeShardIds, getTreeBuyNodes, getCraftableMatPrice } from "../utilities";
-import { STABLE_MIN_DAILY_BUY_VOLUME, isLowSellVolume, MIN_SELL_VOLUME, getUnstableShardIds, applyStableFilter } from "../utilities/stableFilter";
+import { isLowSellVolume, getUnstableShardIds, applyStableFilter } from "../utilities/stableFilter";
+import { loadStableThresholds, saveStableThresholds } from "../utilities/stableThresholds";
 import { DataService } from "../services/dataService";
 import { CalculationService } from "../services/calculationService";
 import { RecipeTreeNode } from "../components/tree";
@@ -12,7 +13,8 @@ function debugShardExclusion(
   targetShardId: string,
   prices: Record<string, PriceInfo>,
   shardBases: ShardBase[],
-  filterLowVolume: boolean
+  filterLowVolume: boolean,
+  minSellVolume: number
 ): void {
   console.group(`[Debug] ${targetShardId}`);
   const priceInfo = prices[targetShardId];
@@ -20,8 +22,8 @@ function debugShardExclusion(
   console.log("buyCost:", priceInfo.buyCost, "sellRevenue:", priceInfo.sellRevenue);
   console.log("dailyBuyVolume:", priceInfo.dailyBuyVolume, "dailySellVolume:", priceInfo.dailySellVolume);
 
-  if (filterLowVolume && isLowSellVolume(priceInfo)) {
-    console.log(`EXCLUDED: isLowSellVolume (dailySellVolume ${priceInfo.dailySellVolume} < ${MIN_SELL_VOLUME})`);
+  if (filterLowVolume && isLowSellVolume(priceInfo, minSellVolume)) {
+    console.log(`EXCLUDED: isLowSellVolume (dailySellVolume ${priceInfo.dailySellVolume} < ${minSellVolume})`);
     console.groupEnd();
     return;
   }
@@ -194,6 +196,8 @@ export const ProfitabilityPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [filterLowVolume, setFilterLowVolume] = useState(true);
   const [filterVolatile, setFilterVolatile] = useState(true);
+  const [minBuyVolume, setMinBuyVolume] = useState(() => loadStableThresholds().minBuyVolume);
+  const [minSellVolume, setMinSellVolume] = useState(() => loadStableThresholds().minSellVolume);
   const [viewMode, setViewMode] = useState<"craft" | "flip">("craft");
   const [buyMode, setBuyMode] = useState<"order" | "instant">("order");
   const [sellMode, setSellMode] = useState<"order" | "instant">("order");
@@ -205,6 +209,10 @@ export const ProfitabilityPage = () => {
   const previousPricesRef = useRef<Record<string, { buyCost: number; sellRevenue: number }> | null>(null);
   const pricesRef = useRef<Record<string, PriceInfo> | null>(null);
   const backgroundFetchDoneRef = useRef(false);
+
+  useEffect(() => {
+    saveStableThresholds({ minBuyVolume, minSellVolume });
+  }, [minBuyVolume, minSellVolume]);
 
   const fetchPrices = useCallback(async () => {
     setError(null);
@@ -315,7 +323,7 @@ export const ProfitabilityPage = () => {
         if (cancelled) return;
 
         if (filterLowVolume) {
-          const excludedIds = getUnstableShardIds(currentPrices, data.recipes);
+          const excludedIds = getUnstableShardIds(currentPrices, data.recipes, minBuyVolume, minSellVolume);
           if (excludedIds.size > 0) {
             data = applyStableFilter(data, excludedIds);
           }
@@ -334,7 +342,7 @@ export const ProfitabilityPage = () => {
         for (const [shardId, shard] of Object.entries(shardData)) {
           const priceInfo = currentPrices[shardId];
           if (!priceInfo) continue;
-          if (filterLowVolume && isLowSellVolume(priceInfo)) continue;
+          if (filterLowVolume && isLowSellVolume(priceInfo, minSellVolume)) continue;
 
           let effectiveTree: RecipeTree | null = null;
           let entryCraftsNeeded = 0;
@@ -358,11 +366,11 @@ export const ProfitabilityPage = () => {
           const lowVolumeShards: string[] = [];
           for (const leafId of leafShards) {
             const leafPrice = currentPrices[leafId];
-            if (leafPrice && (leafPrice.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME || leafPrice.dailySellVolume < MIN_SELL_VOLUME)) {
+            if (leafPrice && (leafPrice.dailyBuyVolume < minBuyVolume || leafPrice.dailySellVolume < minSellVolume)) {
               lowVolumeShards.push(leafId);
             }
           }
-          const outVolumeOk = priceInfo.dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME && priceInfo.dailySellVolume >= MIN_SELL_VOLUME;
+          const outVolumeOk = priceInfo.dailyBuyVolume >= minBuyVolume && priceInfo.dailySellVolume >= minSellVolume;
           const volumeOk = outVolumeOk && lowVolumeShards.length === 0;
 
           shardBases.push({
@@ -391,7 +399,7 @@ export const ProfitabilityPage = () => {
     })();
 
     return () => { cancelled = true; };
-  }, [fusionData, prices, fusionLoading, priceLoading, filterLowVolume]);
+  }, [fusionData, prices, fusionLoading, priceLoading, filterLowVolume, minBuyVolume, minSellVolume]);
 
   useEffect(() => {
     if (heavyDataVersion === 0 || !heavyDataRef.current || !prices) return;
@@ -399,7 +407,7 @@ export const ProfitabilityPage = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const debugShard = urlParams.get("debugShard");
     if (debugShard) {
-      debugShardExclusion(debugShard, prices, heavyDataRef.current.shardBases, filterLowVolume);
+      debugShardExclusion(debugShard, prices, heavyDataRef.current.shardBases, filterLowVolume, minSellVolume);
     }
 
     if (cacheBuiltForRef.current.version !== heavyDataVersion || cacheBuiltForRef.current.prices !== prices) {
@@ -467,7 +475,7 @@ export const ProfitabilityPage = () => {
     });
     setExpandedStates(newExpanded);
     setResults(top10);
-  }, [heavyDataVersion, prices, buyMode, sellMode, viewMode, filterLowVolume, filterVolatile, sortBy]);
+  }, [heavyDataVersion, prices, buyMode, sellMode, viewMode, filterLowVolume, filterVolatile, sortBy, minSellVolume]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -638,6 +646,32 @@ export const ProfitabilityPage = () => {
               <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
             </button>
           </div>
+          {filterLowVolume && (
+            <div className="flex items-center gap-3 mt-1.5 text-xs">
+              <label className="flex items-center gap-1 text-slate-400">
+                Min achat/jour
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={minBuyVolume}
+                  onChange={(e) => setMinBuyVolume(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-slate-400">
+                Min vente/jour
+                <input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={minSellVolume}
+                  onChange={(e) => setMinSellVolume(Math.max(0, Number(e.target.value) || 0))}
+                  className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         {isLoading && !error && (
@@ -679,7 +713,7 @@ export const ProfitabilityPage = () => {
           <div className="space-y-2">
             <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 border border-slate-700/50 rounded-lg text-xs text-slate-300">
               <Info className="w-4 h-4 flex-shrink-0 text-amber-400" />
-              <span>Achat 24h &ge; <strong>{formatLargeNumber(STABLE_MIN_DAILY_BUY_VOLUME)}</strong>, Vente 24h &ge; <strong>{formatLargeNumber(MIN_SELL_VOLUME)}</strong> requis — <ShieldCheck className="w-3 h-3 inline-block text-emerald-400" /> <strong>Stable</strong> filtre le volume. <AlertTriangle className="w-3 h-3 inline-block text-amber-400" /> <strong>Safe</strong> détecte les prix anormaux (pas de filtre, avertissement).</span>
+              <span>Achat 24h &ge; <strong>{formatLargeNumber(minBuyVolume)}</strong>, Vente 24h &ge; <strong>{formatLargeNumber(minSellVolume)}</strong> requis — <ShieldCheck className="w-3 h-3 inline-block text-emerald-400" /> <strong>Stable</strong> filtre le volume. <AlertTriangle className="w-3 h-3 inline-block text-amber-400" /> <strong>Safe</strong> détecte les prix anormaux (pas de filtre, avertissement).</span>
             </div>
             {results.map((entry) => {
               const isProfitable = entry.profit > 0;
@@ -796,6 +830,8 @@ export const ProfitabilityPage = () => {
                           filterLowVolume={filterLowVolume}
                           filterVolatile={filterVolatile}
                           suspiciousPriceShards={suspiciousPriceShards}
+                          minBuyVolume={minBuyVolume}
+                          minSellVolume={minSellVolume}
                         />
                       </div>
                     )}
@@ -872,8 +908,8 @@ export const ProfitabilityPage = () => {
                     })()}
                     {outVol && (
                       <div className="mt-1.5 flex gap-3 text-[11px] text-slate-500">
-                        <span>Achat 24h: <span className={outVol.dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailyBuyVolume)}</span></span>
-                        <span>Vente 24h: <span className={outVol.dailySellVolume >= MIN_SELL_VOLUME ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailySellVolume)}</span></span>
+                        <span>Achat 24h: <span className={outVol.dailyBuyVolume >= minBuyVolume ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailyBuyVolume)}</span></span>
+                        <span>Vente 24h: <span className={outVol.dailySellVolume >= minSellVolume ? "text-slate-300" : "text-red-400"}>{formatLargeNumber(outVol.dailySellVolume)}</span></span>
                       </div>
                     )}
                   </div>

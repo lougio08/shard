@@ -27,6 +27,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
   filterVolatile,
   suspiciousPriceShards,
   substitutedShards,
+  minBuyVolume = MIN_BUY_VOLUME,
+  minSellVolume = MIN_SELL_VOLUME,
 }) => {
   // Helper function to get expansion state
   const pendingDefaults = React.useRef<Map<string, boolean>>(new Map());
@@ -75,6 +77,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
             filterVolatile={filterVolatile}
             suspiciousPriceShards={suspiciousPriceShards}
             substitutedShards={substitutedShards}
+            minBuyVolume={minBuyVolume}
+            minSellVolume={minSellVolume}
           />
         ))}
       </>
@@ -132,7 +136,7 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
         if (hasRecipes) return { filtered: false, reason: "" };
         return { filtered: true, reason: "no price" };
       }
-      if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME || priceInfo.dailySellVolume < MIN_SELL_VOLUME) {
+      if (priceInfo.dailyBuyVolume < minBuyVolume || priceInfo.dailySellVolume < minSellVolume) {
         return { filtered: true, reason: "volume" };
       }
     }
@@ -357,6 +361,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
               substitutedShards={substitutedShards}
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
             />
             <InventoryRecipeTreeNode
               tree={recipeTree.inputs[1]}
@@ -374,6 +380,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
               substitutedShards={substitutedShards}
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
             />
           </div>
         )}
@@ -684,6 +692,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
               substitutedShards={substitutedShards}
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
             />
             <InventoryRecipeTreeNode
               tree={input2}
@@ -701,6 +711,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
               filterVolatile={filterVolatile}
               suspiciousPriceShards={suspiciousPriceShards}
               substitutedShards={substitutedShards}
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
             />
           </div>
         )}

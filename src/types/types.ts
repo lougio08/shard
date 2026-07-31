@@ -185,6 +185,8 @@ export interface RecipeTreeNodeProps {
   filterVolatile?: boolean;
   suspiciousPriceShards?: Set<string>;
   substitutedShards?: Map<string, string>;
+  minBuyVolume?: number;
+  minSellVolume?: number;
 }
 
 export interface InventoryRecipeTreeNodeProps {
@@ -205,6 +207,8 @@ export interface InventoryRecipeTreeNodeProps {
   filterVolatile?: boolean;
   suspiciousPriceShards?: Set<string>;
   substitutedShards?: Map<string, string>;
+  minBuyVolume?: number;
+  minSellVolume?: number;
 }
 
 // searchbar

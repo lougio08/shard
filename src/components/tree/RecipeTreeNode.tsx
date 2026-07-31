@@ -24,6 +24,8 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   filterVolatile,
   suspiciousPriceShards,
   substitutedShards,
+  minBuyVolume = STABLE_MIN_DAILY_BUY_VOLUME,
+  minSellVolume = STABLE_MIN_DAILY_SELL_VOLUME,
 }) => {
   const shard = data.shards[tree.shard];
 
@@ -84,7 +86,7 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
         if (hasRecipes) return { filtered: false, reason: "" };
         return { filtered: true, reason: "no price" };
       }
-      if (priceInfo.dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME || priceInfo.dailySellVolume < STABLE_MIN_DAILY_SELL_VOLUME) {
+      if (priceInfo.dailyBuyVolume < minBuyVolume || priceInfo.dailySellVolume < minSellVolume) {
         return { filtered: true, reason: "volume" };
       }
     }
@@ -126,7 +128,7 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
             <span className={getRarityColor(shard.rarity)}>{shard.name}</span>
             {/* "Stable" warning: low volume */}
             {filterLowVolume && !ironManView && bazaarPrices?.[shard.id] && (
-              (bazaarPrices[shard.id].dailyBuyVolume < STABLE_MIN_DAILY_BUY_VOLUME || bazaarPrices[shard.id].dailySellVolume < STABLE_MIN_DAILY_SELL_VOLUME) && (
+              (bazaarPrices[shard.id].dailyBuyVolume < minBuyVolume || bazaarPrices[shard.id].dailySellVolume < minSellVolume) && (
                 <span title="Volume faible (< 5k achat ou < 5k vente)"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" /></span>
               )
             )}
@@ -791,6 +793,8 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
             filterVolatile={filterVolatile}
             suspiciousPriceShards={suspiciousPriceShards}
             substitutedShards={substitutedShards}
+            minBuyVolume={minBuyVolume}
+            minSellVolume={minSellVolume}
           />
           <RecipeTreeNode
             tree={input2}
@@ -806,6 +810,8 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
             filterVolatile={filterVolatile}
             suspiciousPriceShards={suspiciousPriceShards}
             substitutedShards={substitutedShards}
+            minBuyVolume={minBuyVolume}
+            minSellVolume={minSellVolume}
           />
         </div>
       )}

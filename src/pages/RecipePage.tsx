@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ShardAutocomplete, RecipeCountBadge, SearchFilterInput, ShardDisplay, DropdownButton } from "../components";
-import { getRarityColor, formatLargeNumber, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, getCraftableMatPrice } from "../utilities";
+import { getRarityColor, formatLargeNumber, buildDataFromFusionData, getCraftableMatPrice } from "../utilities";
 import { applyStableFilter, getUnstableShardIds, isLowSellVolume } from "../utilities/stableFilter";
+import { loadStableThresholds, saveStableThresholds } from "../utilities/stableThresholds";
 import { useFusionData, useDropdownManager, useRecipeState } from "../hooks";
 import { processOutputRecipes, categorizeAndGroupRecipes, filterCategorizedRecipes, type Recipe, type CategorizedRecipes, type GroupedRecipe, type FusionData } from "../utilities";
 import { DataService } from "../services/dataService";
-import { CalculationService } from "../services/calculationService";
 import { TrendingUp, TrendingDown, ShieldCheck, AlertTriangle } from "lucide-react";
-import type { ShardWithKey, PriceInfo, Data, RecipeChoice } from "../types/types";
+import type { ShardWithKey, PriceInfo, Data } from "../types/types";
 
 function getInputRecipes(shard: ShardWithKey, fusionData: FusionData): Recipe[] {
   const recipes: Recipe[] = [];
@@ -63,14 +63,17 @@ export const RecipePage = () => {
   const [profitLoading, setProfitLoading] = useState(false);
   const [filterLowVolume, setFilterLowVolume] = useState(true);
   const [filterVolatile, setFilterVolatile] = useState(true);
+  const [minBuyVolume, setMinBuyVolume] = useState(() => loadStableThresholds().minBuyVolume);
+  const [minSellVolume, setMinSellVolume] = useState(() => loadStableThresholds().minSellVolume);
   const [buyMode, setBuyMode] = useState<"order" | "instant">("order");
   const [sellMode, setSellMode] = useState<"order" | "instant">("order");
 
+  useEffect(() => {
+    saveStableThresholds({ minBuyVolume, minSellVolume });
+  }, [minBuyVolume, minSellVolume]);
+
   const cachedPricesRef = useRef<Record<string, PriceInfo> | null>(null);
   const cachedBaseDataRef = useRef<Data | null>(null);
-  const cachedDataRef = useRef<Data | null>(null);
-  const cachedChoicesRef = useRef<Map<string, RecipeChoice> | null>(null);
-  const cachedCycleNodesRef = useRef<string[][]>([]);
   const cachedShardRef = useRef<string | null>(null);
 
   const recalcProfitFromCache = useCallback(() => {
@@ -79,19 +82,12 @@ export const RecipePage = () => {
     const shardKey = cachedShardRef.current;
     if (!prices || !data || !shardKey || !fusionData) return;
 
-    const params = DEFAULT_CALCULATION_PARAMS;
-    const service = CalculationService.getInstance();
-
     if (filterLowVolume) {
-      const excludedIds = getUnstableShardIds(prices, data.recipes);
+        const excludedIds = getUnstableShardIds(prices, data.recipes, minBuyVolume, minSellVolume);
       if (excludedIds.size > 0) {
         data = applyStableFilter(data, excludedIds);
       }
     }
-
-    const { choices, minCosts } = service.computeMinCosts(data, params);
-    const cycleNodes = service.findCycleNodes(choices);
-    const minCostsCache = { minCosts, choices };
 
     let bestProfit = -Infinity;
     let bestResult: {
@@ -102,53 +98,44 @@ export const RecipePage = () => {
       sellRevenue: number;
     } | null = null;
 
-    const matPriceCache = new Map<string, number | undefined>();
+    const matPriceCache2 = new Map<string, number | undefined>();
 
-    for (const [outputShardId] of Object.entries(fusionData.recipes)) {
+    for (const [outputShardId, recipesArray] of Object.entries(data.recipes)) {
       const priceInfo = prices[outputShardId];
       if (!priceInfo) continue;
       const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
       if (effectiveSellRevenue <= 0) continue;
-      if (filterLowVolume && isLowSellVolume(priceInfo)) continue;
+      if (filterLowVolume && isLowSellVolume(priceInfo, minSellVolume)) continue;
 
-      const choice = choices.get(outputShardId);
-      if (!choice || choice.recipe === null) continue;
+      for (const recipe of recipesArray) {
+        const [input1, input2] = recipe.inputs;
+        if (input1 !== shardKey && input2 !== shardKey) continue;
 
-      const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-      const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache, { nodeCount: 0 });
-      service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
-      const stats = service.collectTreeStats(tree, params);
+        const otherInput = input1 === shardKey ? input2 : input1;
+        const outputQty = recipe.outputQuantity;
 
-      let totalMatCost = 0;
-      let allMaterialsPriced = true;
-      stats.totalQuantities.forEach((qty, matId) => {
-        const matPriceInfo = prices[matId];
-        let matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
-        if (matPrice === undefined || matPrice === null || matPrice <= 0) {
-          matPrice = getCraftableMatPrice(matId, prices, data, buyMode, new Set(), matPriceCache);
+        const skPriceInfo = prices[shardKey];
+        let skCost = skPriceInfo ? (buyMode === "instant" ? skPriceInfo.sellRevenue : skPriceInfo.buyCost) : undefined;
+        if (skCost === undefined || skCost <= 0) {
+          skCost = getCraftableMatPrice(shardKey, prices, data, buyMode, new Set(), matPriceCache2);
         }
-        if (matPrice === undefined || matPrice === null || matPrice <= 0) {
-          allMaterialsPriced = false;
+
+        const oiPriceInfo = prices[otherInput];
+        let oiCost = oiPriceInfo ? (buyMode === "instant" ? oiPriceInfo.sellRevenue : oiPriceInfo.buyCost) : undefined;
+        if (oiCost === undefined || oiCost <= 0) {
+          oiCost = getCraftableMatPrice(otherInput, prices, data, buyMode, new Set(), matPriceCache2);
         }
-        totalMatCost += qty * (matPrice ?? 0);
-      });
-      if (!allMaterialsPriced || stats.totalQuantities.size === 0) continue;
 
-      const craftCost = totalMatCost;
-      const sellRevenue = effectiveSellRevenue * outputQty;
-      const profit = sellRevenue - craftCost;
+        if (skCost === undefined || oiCost === undefined) continue;
 
-      if (profit > bestProfit) {
-        bestProfit = profit;
-        bestResult = {
-          outputShard: outputShardId,
-          outputQty,
-          otherInput: tree.method === "recipe"
-            ? (tree.inputs[0].shard === shardKey ? tree.inputs[1].shard : tree.inputs[0].shard)
-            : (choice.recipe.inputs[0] === shardKey ? choice.recipe.inputs[1] : choice.recipe.inputs[0]),
-          craftCost,
-          sellRevenue,
-        };
+        const craftCost = skCost + oiCost;
+        const sellRevenue = effectiveSellRevenue * outputQty;
+        const profit = sellRevenue - craftCost;
+
+        if (profit > bestProfit) {
+          bestProfit = profit;
+          bestResult = { outputShard: outputShardId, outputQty, otherInput, craftCost, sellRevenue };
+        }
       }
     }
 
@@ -169,7 +156,7 @@ export const RecipePage = () => {
       otherInput: bestResult.otherInput,
       sellRevenue: bestResult.sellRevenue,
     });
-  }, [fusionData, filterLowVolume, filterVolatile, buyMode, sellMode]);
+  }, [fusionData, filterLowVolume, filterVolatile, buyMode, sellMode, minBuyVolume, minSellVolume]);
 
   const calculateProfitFull = useCallback(async (shard: ShardWithKey) => {
     if (!fusionData) return;
@@ -195,28 +182,16 @@ export const RecipePage = () => {
         }
       }
 
-      const params = DEFAULT_CALCULATION_PARAMS;
-
-      const service = CalculationService.getInstance();
-
       cachedPricesRef.current = prices;
       cachedBaseDataRef.current = data;
       cachedShardRef.current = shard.key;
 
       if (filterLowVolume) {
-        const excludedIds = getUnstableShardIds(prices, data.recipes);
+      const excludedIds = getUnstableShardIds(prices, data.recipes, minBuyVolume, minSellVolume);
         if (excludedIds.size > 0) {
           data = applyStableFilter(data, excludedIds);
         }
       }
-
-      const { choices, minCosts } = service.computeMinCosts(data, params);
-      const cycleNodes = service.findCycleNodes(choices);
-      const minCostsCache = { minCosts, choices };
-
-      cachedDataRef.current = data;
-      cachedChoicesRef.current = choices;
-      cachedCycleNodesRef.current = cycleNodes;
 
       let bestProfit = -Infinity;
       let bestResult: {
@@ -227,53 +202,44 @@ export const RecipePage = () => {
         sellRevenue: number;
       } | null = null;
 
-      const matPriceCache = new Map<string, number | undefined>();
+      const matPriceCache2 = new Map<string, number | undefined>();
 
-      for (const [outputShardId] of Object.entries(fusionData.recipes)) {
+      for (const [outputShardId, recipesArray] of Object.entries(data.recipes)) {
         const priceInfo = prices[outputShardId];
         if (!priceInfo) continue;
         const effectiveSellRevenue = sellMode === "instant" ? priceInfo.buyCost : priceInfo.sellRevenue;
         if (effectiveSellRevenue <= 0) continue;
-        if (filterLowVolume && isLowSellVolume(priceInfo)) continue;
+        if (filterLowVolume && isLowSellVolume(priceInfo, minSellVolume)) continue;
 
-        const choice = choices.get(outputShardId);
-        if (!choice || choice.recipe === null) continue;
+        for (const recipe of recipesArray) {
+          const [input1, input2] = recipe.inputs;
+          if (input1 !== shard.key && input2 !== shard.key) continue;
 
-        const outputQty = service.getEffectiveOutputQuantity(choice.recipe, 1);
-        const tree = service.buildRecipeTree(data, outputShardId, choices, cycleNodes, params, [], minCostsCache, { nodeCount: 0 });
-        service.assignQuantities(tree, outputQty, data, { total: 0 }, choices, 1, params);
-        const stats = service.collectTreeStats(tree, params);
+          const otherInput = input1 === shard.key ? input2 : input1;
+          const outputQty = recipe.outputQuantity;
 
-        let totalMatCost = 0;
-        let allMaterialsPriced = true;
-        stats.totalQuantities.forEach((qty, matId) => {
-          const matPriceInfo = prices[matId];
-          let matPrice = matPriceInfo ? (buyMode === "instant" ? matPriceInfo.sellRevenue : matPriceInfo.buyCost) : undefined;
-          if (matPrice === undefined || matPrice === null || matPrice <= 0) {
-            matPrice = getCraftableMatPrice(matId, prices, data, buyMode, new Set(), matPriceCache);
+          const skPriceInfo = prices[shard.key];
+          let skCost = skPriceInfo ? (buyMode === "instant" ? skPriceInfo.sellRevenue : skPriceInfo.buyCost) : undefined;
+          if (skCost === undefined || skCost <= 0) {
+            skCost = getCraftableMatPrice(shard.key, prices, data, buyMode, new Set(), matPriceCache2);
           }
-          if (matPrice === undefined || matPrice === null || matPrice <= 0) {
-            allMaterialsPriced = false;
+
+          const oiPriceInfo = prices[otherInput];
+          let oiCost = oiPriceInfo ? (buyMode === "instant" ? oiPriceInfo.sellRevenue : oiPriceInfo.buyCost) : undefined;
+          if (oiCost === undefined || oiCost <= 0) {
+            oiCost = getCraftableMatPrice(otherInput, prices, data, buyMode, new Set(), matPriceCache2);
           }
-          totalMatCost += qty * (matPrice ?? 0);
-        });
-        if (!allMaterialsPriced || stats.totalQuantities.size === 0) continue;
 
-        const craftCost = totalMatCost;
-        const sellRevenue = effectiveSellRevenue * outputQty;
-        const profit = sellRevenue - craftCost;
+          if (skCost === undefined || oiCost === undefined) continue;
 
-        if (profit > bestProfit) {
-          bestProfit = profit;
-          bestResult = {
-            outputShard: outputShardId,
-            outputQty,
-            otherInput: tree.method === "recipe"
-              ? (tree.inputs[0].shard === shard.key ? tree.inputs[1].shard : tree.inputs[0].shard)
-              : (choice.recipe.inputs[0] === shard.key ? choice.recipe.inputs[1] : choice.recipe.inputs[0]),
-            craftCost,
-            sellRevenue,
-          };
+          const craftCost = skCost + oiCost;
+          const sellRevenue = effectiveSellRevenue * outputQty;
+          const profit = sellRevenue - craftCost;
+
+          if (profit > bestProfit) {
+            bestProfit = profit;
+            bestResult = { outputShard: outputShardId, outputQty, otherInput, craftCost, sellRevenue };
+          }
         }
       }
 
@@ -301,7 +267,7 @@ export const RecipePage = () => {
     } finally {
       if (!isCancelled) setProfitLoading(false);
     }
-  }, [fusionData, filterLowVolume, filterVolatile, buyMode, sellMode]);
+  }, [fusionData, filterLowVolume, filterVolatile, buyMode, sellMode, minBuyVolume, minSellVolume]);
 
   useEffect(() => {
     if (selectedProfitShard) {
@@ -315,7 +281,7 @@ export const RecipePage = () => {
       }
     }
     return () => {};
-  }, [filterLowVolume, filterVolatile, selectedProfitShard, calculateProfitFull, recalcProfitFromCache]);
+  }, [filterLowVolume, filterVolatile, selectedProfitShard, calculateProfitFull, recalcProfitFromCache, minBuyVolume, minSellVolume]);
 
   useEffect(() => {
     if (!fusionData) {
@@ -721,6 +687,32 @@ export const RecipePage = () => {
                 </button>
               </div>
             </div>
+            {filterLowVolume && (
+              <div className="flex items-center gap-3 text-xs">
+                <label className="flex items-center gap-1 text-slate-400">
+                  Min achat/jour
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={minBuyVolume}
+                    onChange={(e) => setMinBuyVolume(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
+                  />
+                </label>
+                <label className="flex items-center gap-1 text-slate-400">
+                  Min vente/jour
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={minSellVolume}
+                    onChange={(e) => setMinSellVolume(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
+                  />
+                </label>
+              </div>
+            )}
             {selectedProfitShard && (
               <div className="flex items-center justify-center gap-2 lg:gap-3">
                 <div className="flex items-center gap-1 text-sm">

@@ -1,11 +1,16 @@
 import type { Data, Shards, RecipeTree } from "../types/types";
 
-export const STABLE_MIN_DAILY_BUY_VOLUME = 5000;
-export const STABLE_MIN_DAILY_SELL_VOLUME = 1000;
+export const DEFAULT_MIN_DAILY_BUY_VOLUME = 5000;
+export const DEFAULT_MIN_DAILY_SELL_VOLUME = 1000;
+export const STABLE_MIN_DAILY_BUY_VOLUME = DEFAULT_MIN_DAILY_BUY_VOLUME;
+export const STABLE_MIN_DAILY_SELL_VOLUME = DEFAULT_MIN_DAILY_SELL_VOLUME;
 export const MIN_SELL_VOLUME = 5000;
 
-export function isLowSellVolume(priceInfo: { dailySellVolume: number }): boolean {
-  return priceInfo.dailySellVolume < STABLE_MIN_DAILY_SELL_VOLUME;
+export function isLowSellVolume(
+  priceInfo: { dailySellVolume: number },
+  minDailySellVolume: number = DEFAULT_MIN_DAILY_SELL_VOLUME
+): boolean {
+  return priceInfo.dailySellVolume < minDailySellVolume;
 }
 
 export function applyStableFilter(
@@ -24,7 +29,9 @@ export function applyStableFilter(
 
 export function getUnstableShardIds(
   prices: Record<string, { dailyBuyVolume: number; dailySellVolume?: number }>,
-  recipes?: Record<string, { length: number }>
+  recipes?: Record<string, { length: number }>,
+  minDailyBuyVolume: number = DEFAULT_MIN_DAILY_BUY_VOLUME,
+  minDailySellVolume: number = DEFAULT_MIN_DAILY_SELL_VOLUME
 ): Set<string> {
   const excluded = new Set<string>();
   for (const [shardId, price] of Object.entries(prices)) {
@@ -34,7 +41,7 @@ export function getUnstableShardIds(
     }
     const buyVol = price.dailyBuyVolume ?? 0;
     const sellVol = price.dailySellVolume ?? 0;
-    if (buyVol < STABLE_MIN_DAILY_BUY_VOLUME || sellVol < STABLE_MIN_DAILY_SELL_VOLUME) {
+    if (buyVol < minDailyBuyVolume || sellVol < minDailySellVolume) {
       excluded.add(shardId);
     }
   }
