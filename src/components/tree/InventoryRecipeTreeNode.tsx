@@ -7,7 +7,7 @@ import type { InventoryRecipeTreeNodeProps, Recipe, Shard, InventoryRecipeTree }
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
 
-import { STABLE_MIN_DAILY_BUY_VOLUME as MIN_BUY_VOLUME, STABLE_MIN_DAILY_SELL_VOLUME as MIN_SELL_VOLUME } from "../../utilities/stableFilter";
+import { DEFAULT_MIN_DAILY_BUY_VOLUME, DEFAULT_MIN_DAILY_SELL_VOLUME } from "../../utilities/stableFilter";
 
 export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = ({
   tree,
@@ -27,8 +27,8 @@ export const InventoryRecipeTreeNode: React.FC<InventoryRecipeTreeNodeProps> = (
   filterVolatile,
   suspiciousPriceShards,
   substitutedShards,
-  minBuyVolume = MIN_BUY_VOLUME,
-  minSellVolume = MIN_SELL_VOLUME,
+  minBuyVolume = DEFAULT_MIN_DAILY_BUY_VOLUME,
+  minSellVolume = DEFAULT_MIN_DAILY_SELL_VOLUME,
 }) => {
   // Helper function to get expansion state
   const pendingDefaults = React.useRef<Map<string, boolean>>(new Map());

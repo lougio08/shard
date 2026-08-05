@@ -6,3 +6,4 @@ export { useShards } from "./useShards";
 export { useShardsWithRecipes } from "./useShardsWithRecipes";
 export { useCalculatorState } from "./useCalculatorState.ts"
 export { useRecipeState } from "./useRecipeState.ts"
+export { useStableThresholds } from "./useStableThresholds";

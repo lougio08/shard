@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { TrendingUp, TrendingDown, BarChart3, RefreshCw, AlertCircle, Info, ShieldCheck, ShieldX, AlertTriangle, Hammer, Clock } from "lucide-react";
-import { useFusionData } from "../hooks";
+import { useFusionData, useStableThresholds } from "../hooks";
 import { getRarityColor, formatLargeNumber, saveBazaarCache, loadBazaarCache, DEFAULT_CALCULATION_PARAMS, buildDataFromFusionData, detectPriceAnomaly, collectTreeShardIds, getTreeBuyNodes, getCraftableMatPrice } from "../utilities";
 import { isLowSellVolume, getUnstableShardIds, applyStableFilter } from "../utilities/stableFilter";
-import { loadStableThresholds, saveStableThresholds } from "../utilities/stableThresholds";
+import { StableThresholdInputs } from "../components/common";
 import { DataService } from "../services/dataService";
 import { CalculationService } from "../services/calculationService";
 import { RecipeTreeNode } from "../components/tree";
@@ -196,8 +196,7 @@ export const ProfitabilityPage = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [filterLowVolume, setFilterLowVolume] = useState(true);
   const [filterVolatile, setFilterVolatile] = useState(true);
-  const [minBuyVolume, setMinBuyVolume] = useState(() => loadStableThresholds().minBuyVolume);
-  const [minSellVolume, setMinSellVolume] = useState(() => loadStableThresholds().minSellVolume);
+  const { minBuyVolume, minSellVolume, setMinBuyVolume, setMinSellVolume } = useStableThresholds();
   const [viewMode, setViewMode] = useState<"craft" | "flip">("craft");
   const [buyMode, setBuyMode] = useState<"order" | "instant">("order");
   const [sellMode, setSellMode] = useState<"order" | "instant">("order");
@@ -209,10 +208,6 @@ export const ProfitabilityPage = () => {
   const previousPricesRef = useRef<Record<string, { buyCost: number; sellRevenue: number }> | null>(null);
   const pricesRef = useRef<Record<string, PriceInfo> | null>(null);
   const backgroundFetchDoneRef = useRef(false);
-
-  useEffect(() => {
-    saveStableThresholds({ minBuyVolume, minSellVolume });
-  }, [minBuyVolume, minSellVolume]);
 
   const fetchPrices = useCallback(async () => {
     setError(null);
@@ -550,7 +545,7 @@ export const ProfitabilityPage = () => {
   const isLoading = fusionLoading || priceLoading;
 
   return (
-    <div className="min-h-screen">
+    <div>
       <div className="px-2 sm:px-4 py-4 max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -565,29 +560,29 @@ export const ProfitabilityPage = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+            <div className="flex border border-[#726e97] text-xs">
               <button
-                className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${viewMode === "craft" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${viewMode === "craft" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setViewMode("craft")}
               >
                 Craft
               </button>
               <button
-                className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${viewMode === "flip" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${viewMode === "flip" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setViewMode("flip")}
               >
                 Flip
               </button>
             </div>
-            <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+            <div className="flex border border-[#726e97] text-xs">
               <button
-                className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${sortBy === "profit" ? "bg-amber-500/20 text-amber-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${sortBy === "profit" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setSortBy("profit")}
               >
                 Profit
               </button>
               <button
-                className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${sortBy === "margin" ? "bg-amber-500/20 text-amber-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${sortBy === "margin" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setSortBy("margin")}
               >
                 Margin %
@@ -609,29 +604,29 @@ export const ProfitabilityPage = () => {
               <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
               {filterVolatile ? "Safe" : "All"}
             </button>
-            <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+            <div className="flex border border-[#726e97] text-xs">
               <button
-                className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${buyMode === "order" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${buyMode === "order" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setBuyMode("order")}
               >
                   Buy Order
               </button>
               <button
-                className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${buyMode === "instant" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${buyMode === "instant" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setBuyMode("instant")}
               >
                 Instant
               </button>
             </div>
-            <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+            <div className="flex border border-[#726e97] text-xs">
               <button
-                className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${sellMode === "order" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${sellMode === "order" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setSellMode("order")}
               >
                   Sell Order
               </button>
               <button
-                className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${sellMode === "instant" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${sellMode === "instant" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                 onClick={() => setSellMode("instant")}
               >
                 Instant
@@ -647,30 +642,12 @@ export const ProfitabilityPage = () => {
             </button>
           </div>
           {filterLowVolume && (
-            <div className="flex items-center gap-3 mt-1.5 text-xs">
-              <label className="flex items-center gap-1 text-slate-400">
-                Min achat/jour
-                <input
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={minBuyVolume}
-                  onChange={(e) => setMinBuyVolume(Math.max(0, Number(e.target.value) || 0))}
-                  className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
-                />
-              </label>
-              <label className="flex items-center gap-1 text-slate-400">
-                Min vente/jour
-                <input
-                  type="number"
-                  min={0}
-                  step={100}
-                  value={minSellVolume}
-                  onChange={(e) => setMinSellVolume(Math.max(0, Number(e.target.value) || 0))}
-                  className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
-                />
-              </label>
-            </div>
+            <StableThresholdInputs
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
+              onMinBuyVolumeChange={setMinBuyVolume}
+              onMinSellVolumeChange={setMinSellVolume}
+            />
           )}
         </div>
 

@@ -31,7 +31,7 @@ export const GuidePage: React.FC = () => {
     return (
       <div className="max-w-4xl mx-auto py-6 px-4">
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 text-purple-400 animate-spin mr-3" />
+          <Loader2 className="w-8 h-8 text-[#83b5d1] animate-spin mr-3" />
           <span className="text-slate-300">Loading guide...</span>
         </div>
       </div>
@@ -51,10 +51,11 @@ export const GuidePage: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto py-6 px-4">
+      <div className="glass glass-hover p-6 sm:p-10">
       {/* Header */}
       <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-purple-500/20 border border-purple-500/20 rounded-xl flex items-center justify-center mx-auto mb-4">
-          <BookOpen className="w-8 h-8 text-purple-400" />
+        <div className="w-16 h-16 bg-[#83b5d1]/10 border border-[#83b5d1]/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <BookOpen className="w-8 h-8 text-[#83b5d1]" />
         </div>
       </div>
 
@@ -125,6 +126,7 @@ export const GuidePage: React.FC = () => {
         >
           {markdownContent}
         </ReactMarkdown>
+      </div>
       </div>
     </div>
   );

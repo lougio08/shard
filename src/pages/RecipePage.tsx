@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { ShardAutocomplete, RecipeCountBadge, SearchFilterInput, ShardDisplay, DropdownButton } from "../components";
 import { getRarityColor, formatLargeNumber, buildDataFromFusionData, getCraftableMatPrice } from "../utilities";
 import { applyStableFilter, getUnstableShardIds, isLowSellVolume } from "../utilities/stableFilter";
-import { loadStableThresholds, saveStableThresholds } from "../utilities/stableThresholds";
-import { useFusionData, useDropdownManager, useRecipeState } from "../hooks";
+import { StableThresholdInputs } from "../components/common";
+import { useFusionData, useDropdownManager, useRecipeState, useStableThresholds } from "../hooks";
 import { processOutputRecipes, categorizeAndGroupRecipes, filterCategorizedRecipes, type Recipe, type CategorizedRecipes, type GroupedRecipe, type FusionData } from "../utilities";
 import { DataService } from "../services/dataService";
 import { TrendingUp, TrendingDown, ShieldCheck, AlertTriangle } from "lucide-react";
@@ -63,14 +63,9 @@ export const RecipePage = () => {
   const [profitLoading, setProfitLoading] = useState(false);
   const [filterLowVolume, setFilterLowVolume] = useState(true);
   const [filterVolatile, setFilterVolatile] = useState(true);
-  const [minBuyVolume, setMinBuyVolume] = useState(() => loadStableThresholds().minBuyVolume);
-  const [minSellVolume, setMinSellVolume] = useState(() => loadStableThresholds().minSellVolume);
+  const { minBuyVolume, minSellVolume, setMinBuyVolume, setMinSellVolume } = useStableThresholds();
   const [buyMode, setBuyMode] = useState<"order" | "instant">("order");
   const [sellMode, setSellMode] = useState<"order" | "instant">("order");
-
-  useEffect(() => {
-    saveStableThresholds({ minBuyVolume, minSellVolume });
-  }, [minBuyVolume, minSellVolume]);
 
   const cachedPricesRef = useRef<Record<string, PriceInfo> | null>(null);
   const cachedBaseDataRef = useRef<Data | null>(null);
@@ -340,7 +335,7 @@ export const RecipePage = () => {
 
   if (loading && !fusionData) {
     return (
-      <div className="min-h-screen">
+      <div>
         <div className="w-full border-b border-slate-700/30">
           <div className="px-4 py-4 flex justify-center">
             <div className="w-full max-w-lg">
@@ -357,7 +352,7 @@ export const RecipePage = () => {
           </div>
         </div>
         <div className="flex items-center justify-center py-16">
-          <div className="w-8 h-8 border-2 border-purple-500/20 border-t-purple-500 rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-[#83b5d1]/20 border-t-[#83b5d1] rounded-full animate-spin" />
         </div>
       </div>
     );
@@ -621,11 +616,11 @@ export const RecipePage = () => {
   };
 
   return (
-    <div className="min-h-screen">
+    <div>
       <div className="px-2 sm:px-4 py-4">
         {/* Most profit panel - centered above */}
         <div className="flex justify-center mb-4 lg:mb-6">
-          <div className="bg-slate-800/40 border border-slate-600/30 rounded-md p-3 lg:p-4 flex flex-col gap-2 w-full lg:max-w-lg">
+          <div className="glass rounded-2xl p-3 lg:p-4 flex flex-col gap-2 w-full lg:max-w-lg">
             <div className="w-full">
               <label className="flex items-center gap-2 text-sm font-medium text-amber-300 mb-2">
                 <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
@@ -658,29 +653,29 @@ export const RecipePage = () => {
                 <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
                 {filterVolatile ? "Safe" : "All"}
               </button>
-              <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+              <div className="flex border border-[#726e97] text-xs">
                 <button
-                  className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${buyMode === "order" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${buyMode === "order" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                   onClick={() => setBuyMode("order")}
                 >
                   Buy Order
                 </button>
                 <button
-                  className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${buyMode === "instant" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${buyMode === "instant" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                   onClick={() => setBuyMode("instant")}
                 >
                   Instant
                 </button>
               </div>
-              <div className="flex bg-slate-800 rounded-md border border-slate-700 text-xs">
+              <div className="flex border border-[#726e97] text-xs">
                 <button
-                  className={`px-2 py-1.5 rounded-l-md transition-colors cursor-pointer ${sellMode === "order" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${sellMode === "order" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                   onClick={() => setSellMode("order")}
                 >
                   Sell Order
                 </button>
                 <button
-                  className={`px-2 py-1.5 rounded-r-md transition-colors cursor-pointer ${sellMode === "instant" ? "bg-purple-500/20 text-purple-300" : "text-slate-400 hover:text-slate-300"}`}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer ${sellMode === "instant" ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"}`}
                   onClick={() => setSellMode("instant")}
                 >
                   Instant
@@ -688,30 +683,12 @@ export const RecipePage = () => {
               </div>
             </div>
             {filterLowVolume && (
-              <div className="flex items-center gap-3 text-xs">
-                <label className="flex items-center gap-1 text-slate-400">
-                  Min achat/jour
-                  <input
-                    type="number"
-                    min={0}
-                    step={100}
-                    value={minBuyVolume}
-                    onChange={(e) => setMinBuyVolume(Math.max(0, Number(e.target.value) || 0))}
-                    className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
-                  />
-                </label>
-                <label className="flex items-center gap-1 text-slate-400">
-                  Min vente/jour
-                  <input
-                    type="number"
-                    min={0}
-                    step={100}
-                    value={minSellVolume}
-                    onChange={(e) => setMinSellVolume(Math.max(0, Number(e.target.value) || 0))}
-                    className="w-20 bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200"
-                  />
-                </label>
-              </div>
+              <StableThresholdInputs
+                minBuyVolume={minBuyVolume}
+                minSellVolume={minSellVolume}
+                onMinBuyVolumeChange={setMinBuyVolume}
+                onMinSellVolumeChange={setMinSellVolume}
+              />
             )}
             {selectedProfitShard && (
               <div className="flex items-center justify-center gap-2 lg:gap-3">

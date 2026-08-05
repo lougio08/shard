@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap");
 @import "tailwindcss";
 
 @font-face {
@@ -9,12 +9,272 @@
   font-display: swap;
 }
 
-body {
-  font-family: "Inter", "Minecraft", sans-serif;
-  background-color: #0f172a;
-  color: #f1f5f9;
+/* ─────────────────────────────────────────────
+   SKYSHARDS PALETTE — design tokens
+   Mauve Shadow #673c4f · Dusty Lavender #7f557d
+   Vintage Lavender #726e97 · Steel Blue #7698b3
+   Sky Reflection #83b5d1
+   ───────────────────────────────────────────── */
+@theme {
+  --font-sans: "JetBrains Mono", "Minecraft", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono", "Minecraft", ui-monospace, monospace;
+
+  /* Neutrals (mauve-tinted ramp, anchored on the palette) */
+  --color-slate-50: #f6f0f8;
+  --color-slate-100: #eadfe9;
+  --color-slate-200: #d9c9d6;
+  --color-slate-300: #c2adbf;
+  --color-slate-400: #83b5d1;
+  --color-slate-500: #7698b3;
+  --color-slate-600: #726e97;
+  --color-slate-700: #5d4d6e;
+  --color-slate-800: #45304d;
+  --color-slate-900: #35243c;
+  --color-slate-950: #241626;
+
+  /* Primary (Sky Reflection) */
+  --color-purple-50: #f8f1f9;
+  --color-purple-100: #eedfeb;
+  --color-purple-200: #dfc1d9;
+  --color-purple-300: #d0a0c5;
+  --color-purple-400: #a97ca6;
+  --color-purple-500: #8c6289;
+  --color-purple-600: #6f4e6c;
+  --color-purple-700: #543b52;
+  --color-purple-800: #3a2939;
+  --color-purple-900: #241a24;
+  --color-purple-950: #150e15;
+
+  /* Secondary (Steel Blue) */
+  --color-green-50: #f1f6f8;
+  --color-green-100: #dce8ee;
+  --color-green-200: #bad1e0;
+  --color-green-300: #99bad1;
+  --color-green-400: #7698b3;
+  --color-green-500: #6588a4;
+  --color-green-600: #53718b;
+  --color-green-700: #42596e;
+  --color-green-800: #2f404f;
+  --color-green-900: #1e2a34;
+  --color-green-950: #121a21;
+
+  /* Amber (legendary gold / warnings) */
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  --color-amber-800: #92400e;
+  --color-amber-900: #78350f;
+  --color-amber-950: #451a03;
+
+  /* Rare (Vintage Lavender) */
+  --color-blue-50: #f3eef7;
+  --color-blue-100: #e0d6ec;
+  --color-blue-200: #c3afdc;
+  --color-blue-300: #a68cc9;
+  --color-blue-400: #726e97;
+  --color-blue-500: #5f5c83;
+  --color-blue-600: #4c4a69;
+  --color-blue-700: #3b394f;
+  --color-blue-800: #2a2838;
+  --color-blue-900: #1a1923;
+  --color-blue-950: #100f16;
+
+  /* Epic / special (Dusty Lavender) */
+  --color-fuchsia-50: #f7f0f7;
+  --color-fuchsia-100: #ecdcec;
+  --color-fuchsia-200: #dbbddd;
+  --color-fuchsia-300: #c99ecc;
+  --color-fuchsia-400: #7f557d;
+  --color-fuchsia-500: #6f4a6e;
+  --color-fuchsia-600: #5a3c59;
+  --color-fuchsia-700: #452e44;
+  --color-fuchsia-800: #312030;
+  --color-fuchsia-900: #1f141f;
+  --color-fuchsia-950: #120b12;
+
+  /* Emerald (Steel Blue ramp) */
+  --color-emerald-50: #f0f5f8;
+  --color-emerald-100: #dce7ee;
+  --color-emerald-200: #bad0e0;
+  --color-emerald-300: #99b9d1;
+  --color-emerald-400: #7698b3;
+  --color-emerald-500: #6689a5;
+  --color-emerald-600: #54728b;
+  --color-emerald-700: #42596e;
+  --color-emerald-800: #2f404f;
+  --color-emerald-900: #1e2a34;
+  --color-emerald-950: #121a21;
+
+  /* Error */
+  --color-red-50: #ffebeb;
+  --color-red-100: #ffd0d0;
+  --color-red-200: #ffa8a8;
+  --color-red-300: #ff8080;
+  --color-red-400: #ff5c5c;
+  --color-red-500: #ff3333;
+  --color-red-600: #e02222;
+  --color-red-700: #b31c1c;
+  --color-red-800: #7a1313;
+  --color-red-900: #4a0b0b;
+  --color-red-950: #2a0606;
+
+  /* Foreground/background */
+  --color-white: #83b5d1;
+  --color-black: #0a0a0a;
+
+  /* No rounded corners. Absolutely none. */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+  --radius-full: 0px;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "JetBrains Mono", "Minecraft", ui-monospace, monospace;
+  background-color: #0a0a0a;
+  color: #83b5d1;
+  text-shadow: 0 0 5px rgba(131, 181, 209, 0.5);
+  -webkit-font-smoothing: antialiased;
+  caret-color: #83b5d1;
+}
+
+::selection {
+  background-color: #83b5d1;
+  color: #241626;
+}
+
+/* ─────────────────────────────────────────────
+   Windows & panes
+   ───────────────────────────────────────────── */
+.glass {
+  background: #0d130d;
+  border: 1px solid #726e97;
+}
+
+.glass-soft {
+  background: #111a11;
+  border: 1px solid #726e97;
+}
+
+.glass-hover {
+  transition: border-color 0.15s step-end, background-color 0.15s step-end;
+}
+
+.glass-hover:hover {
+  border-color: #83b5d1;
+  background-color: rgba(131, 181, 209, 0.12);
+}
+
+/* Title bar */
+.title-bar {
+  border-bottom: 1px solid #726e97;
+  background: #0d130d;
+}
+
+/* ─────────────────────────────────────────────
+   Buttons — bracketed, inverted on hover
+   ───────────────────────────────────────────── */
+.btn-neon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid #83b5d1;
+  background: transparent;
+  color: #83b5d1;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.75rem 1.5rem;
+  transition: background-color 0.1s step-end, color 0.1s step-end;
+  cursor: pointer;
+}
+
+.btn-neon:hover {
+  background-color: #83b5d1;
+  color: #241626;
+  text-shadow: none;
+}
+
+.btn-neon:active {
+  transform: translateY(1px);
+}
+
+/* ─────────────────────────────────────────────
+   Cursor & status
+   ───────────────────────────────────────────── */
+@keyframes blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
+.status-dot {
+  width: 9px;
+  height: 13px;
+  display: inline-block;
+  background-color: #83b5d1;
+  animation: blink 1s step-end infinite;
+}
+
+/* Monospaced technical label */
+.mono-label {
+  font-family: "JetBrains Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 10px;
+}
+
+/* ─────────────────────────────────────────────
+   Typewriter & glitch
+   ───────────────────────────────────────────── */
+@keyframes typing {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+.typing-demo {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 100%;
+  border-right: 2px solid #83b5d1;
+  animation: typing 3.5s steps(30, end) 0.5s both, blink 0.75s step-end 3.5s 3;
+}
+
+@keyframes glitch {
+  0% { transform: translate(0, 0); text-shadow: 0 0 5px rgba(131, 181, 209, 0.5); }
+  20% { transform: translate(-1px, 1px); text-shadow: -2px 0 5px rgba(127, 85, 125, 0.6), 2px 0 5px rgba(131, 181, 209, 0.4); }
+  40% { transform: translate(1px, -1px); }
+  60% { transform: translate(-1px, 0); }
+  80% { transform: translate(1px, 1px); text-shadow: 2px 0 5px rgba(114, 110, 151, 0.5); }
+  100% { transform: translate(0, 0); }
+}
+
+.glitch-hover {
+  animation: glitch 0.3s steps(2) infinite;
+}
+
+/* ─────────────────────────────────────────────
+   Ad layout
+   ───────────────────────────────────────────── */
 .pn-leaderboard {
   width: 100%;
   min-height: 100px;
@@ -29,13 +289,14 @@ body {
   .pn-page {
     width: 100%;
     display: grid;
-    grid-template-columns: 100px minmax(0, 1fr) 300px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1168px) minmax(0, 1fr);
     column-gap: 16px;
     align-items: start;
   }
 
   .pn-left {
     grid-column: 1;
+    justify-self: start;
   }
 
   .pn-content {
@@ -46,11 +307,12 @@ body {
   .pn-sidebar {
     grid-column: 3;
     display: block;
-    width: 300px;
+    width: min(300px, 100%);
     min-height: 600px;
     position: sticky;
     top: 16px;
     align-self: start;
+    justify-self: end;
   }
 }
 
@@ -85,14 +347,14 @@ input[type="number"] {
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: #0a0a0a;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #475569;
-  border-radius: 3px;
+  background: #726e97;
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: #83b5d1;
 }

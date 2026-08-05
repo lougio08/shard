@@ -56,11 +56,11 @@ export const SettingsPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex flex-col space-y-4 py-4">
+    <div className="flex flex-col space-y-4 py-4">
       {/* Controls */}
-      <div className="bg-white/5 border border-white/10 rounded-md p-4">
+      <div className="glass rounded-2xl p-4">
         <div className="text-center pb-6 pt-2">
-          <h1 className="text-2xl font-black text-purple-400 mb-2">Shard Overview and Rates</h1>
+          <h1 className="text-2xl font-bold text-[#83b5d1] mb-2 tracking-tight">Shard Overview and Rates</h1>
           <p className="text-slate-400">
             Customize gathering rates<span className="font-bold text-slate-500 mx-0.5">/</span>
             <span className="text-slate-500">hr</span> for more accurate calculations
@@ -80,8 +80,8 @@ export const SettingsPage: React.FC = () => {
               className="
                 w-full pl-10 pr-4 py-2.5 
                 bg-white/5 border border-white/10 
-                rounded-md text-white placeholder-slate-400
-                focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
+                rounded-full text-white placeholder-slate-400
+                focus:outline-none focus:ring-2 focus:ring-[#83b5d1]/50 focus:border-[#83b5d1]/50
                 transition-colors duration-200
               "
             />
@@ -93,14 +93,14 @@ export const SettingsPage: React.FC = () => {
             <button
               onClick={() => setDetailedShard((prev) => !prev)}
               className="
-                px-3 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 
-                text-indigo-400 font-medium rounded-md 
-                border border-indigo-500/20 hover:border-indigo-500/30
+                px-3 py-2.5 bg-[#83b5d1]/15 hover:bg-[#83b5d1]/25 
+                text-[#83b5d1] font-medium rounded-full 
+                border border-[#83b5d1]/25 hover:border-[#83b5d1]/40
                 transition-colors duration-200
                 flex items-center space-x-2 cursor-pointer
               "
             >
-              <AlignLeft className="w-5 h-5 text-indigo-400" />
+              <AlignLeft className="w-5 h-5 text-[#83b5d1]" />
               <span>{detailedShard ? "Hide Details" : "Show Details"}</span>
             </button>
             <button
@@ -133,8 +133,8 @@ export const SettingsPage: React.FC = () => {
               className="
                 w-full pl-10 pr-4 py-2.5 
                 bg-white/5 border border-white/10 
-                rounded-md text-white placeholder-slate-400
-                focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50
+                rounded-full text-white placeholder-slate-400
+                focus:outline-none focus:ring-2 focus:ring-[#83b5d1]/50 focus:border-[#83b5d1]/50
                 transition-colors duration-200
               "
             />
@@ -145,14 +145,14 @@ export const SettingsPage: React.FC = () => {
           <button
             onClick={() => setDetailedShard((prev) => !prev)}
             className="
-                px-3 py-2.5 bg-indigo-500/20 hover:bg-indigo-500/30 
-                text-indigo-400 font-medium rounded-md 
-                border border-indigo-500/20 hover:border-indigo-500/30
+                px-3 py-2.5 bg-[#83b5d1]/15 hover:bg-[#83b5d1]/25 
+                text-[#83b5d1] font-medium rounded-full 
+                border border-[#83b5d1]/25 hover:border-[#83b5d1]/40
                 transition-colors duration-200
                 flex items-center space-x-2 cursor-pointer
               "
           >
-            <AlignLeft className="w-5 h-5 text-indigo-400" />
+            <AlignLeft className="w-5 h-5 text-[#83b5d1]" />
             <span>{detailedShard ? "Hide Details" : "Show Details"}</span>
           </button>
           <div className="flex gap-2">
@@ -179,7 +179,7 @@ export const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white/5 border border-white/10 rounded-md overflow-hidden flex-1">
+      <div className="glass rounded-2xl overflow-hidden flex-1">
         <div className="h-full overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 p-3 auto-rows-fr">
             {filteredShards.map((shard) => {

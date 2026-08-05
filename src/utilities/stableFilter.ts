@@ -2,9 +2,6 @@ import type { Data, Shards, RecipeTree } from "../types/types";
 
 export const DEFAULT_MIN_DAILY_BUY_VOLUME = 5000;
 export const DEFAULT_MIN_DAILY_SELL_VOLUME = 1000;
-export const STABLE_MIN_DAILY_BUY_VOLUME = DEFAULT_MIN_DAILY_BUY_VOLUME;
-export const STABLE_MIN_DAILY_SELL_VOLUME = DEFAULT_MIN_DAILY_SELL_VOLUME;
-export const MIN_SELL_VOLUME = 5000;
 
 export function isLowSellVolume(
   priceInfo: { dailySellVolume: number },

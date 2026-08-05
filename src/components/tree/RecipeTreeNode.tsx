@@ -6,7 +6,7 @@ import { formatNumber } from "../../utilities";
 import type { RecipeTreeNodeProps, Recipe, Shard, RecipeTree } from "../../types/types";
 import { Tooltip } from "../ui";
 import { SHARD_DESCRIPTIONS } from "../../constants";
-import { STABLE_MIN_DAILY_BUY_VOLUME, STABLE_MIN_DAILY_SELL_VOLUME } from "../../utilities/stableFilter";
+import { DEFAULT_MIN_DAILY_BUY_VOLUME, DEFAULT_MIN_DAILY_SELL_VOLUME } from "../../utilities/stableFilter";
 
 export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   tree,
@@ -24,8 +24,8 @@ export const RecipeTreeNode: React.FC<RecipeTreeNodeProps> = ({
   filterVolatile,
   suspiciousPriceShards,
   substitutedShards,
-  minBuyVolume = STABLE_MIN_DAILY_BUY_VOLUME,
-  minSellVolume = STABLE_MIN_DAILY_SELL_VOLUME,
+  minBuyVolume = DEFAULT_MIN_DAILY_BUY_VOLUME,
+  minSellVolume = DEFAULT_MIN_DAILY_SELL_VOLUME,
 }) => {
   const shard = data.shards[tree.shard];
 

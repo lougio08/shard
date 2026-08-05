@@ -1,6 +1,6 @@
 import type { Data, CalculationParams, RecipeTree, PriceInfo, HistoryPoint, Shard } from "../types/types";
 import type { FusionData } from "./recipeUtils";
-import { STABLE_MIN_DAILY_BUY_VOLUME } from "./stableFilter";
+import { DEFAULT_MIN_DAILY_BUY_VOLUME } from "./stableFilter";
 
 const PRICE_SWING_THRESHOLD = 0.5;
 
@@ -168,7 +168,7 @@ export function detectPriceAnomaly(
 }
 
 export function isStableVolume(dailyBuyVolume: number): boolean {
-  return dailyBuyVolume >= STABLE_MIN_DAILY_BUY_VOLUME;
+  return dailyBuyVolume >= DEFAULT_MIN_DAILY_BUY_VOLUME;
 }
 
 export const MAT_CACHE_MAX_DEPTH = 30;

@@ -24,16 +24,16 @@ export const GreenhouseModal: React.FC<GreenhouseModalProps> = ({ open, onClose 
   return createPortal(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
-        className="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl max-w-md w-full overflow-hidden flex flex-col"
+        className="glass rounded-3xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-4 border-b border-slate-700 bg-slate-800/50 flex-shrink-0">
+        <div className="p-4 border-b border-white/10 bg-slate-800/50 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-semibold text-white">SkyShards - Greenhouse Release</h2>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-slate-700 rounded-lg transition-colors cursor-pointer" aria-label="Close">
+            <button onClick={onClose} className="p-2 hover:bg-slate-700 rounded-full transition-colors cursor-pointer" aria-label="Close">
               <X className="w-5 h-5 text-slate-400" />
             </button>
           </div>
@@ -51,11 +51,11 @@ export const GreenhouseModal: React.FC<GreenhouseModalProps> = ({ open, onClose 
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-slate-700 bg-slate-800/50 flex-shrink-0">
+        <div className="p-4 border-t border-white/10 bg-slate-800/50 flex-shrink-0">
           <div className="flex items-center justify-end gap-3">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-slate-300 hover:text-white transition-colors duration-200"
+              className="px-4 py-2 text-slate-300 hover:text-white transition-colors duration-200 cursor-pointer"
             >
               Close
             </button>
@@ -63,7 +63,7 @@ export const GreenhouseModal: React.FC<GreenhouseModalProps> = ({ open, onClose 
               href={GREENHOUSE_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-md shadow focus:outline-none focus:ring-2 focus:ring-green-500/50 transition-colors duration-200"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#83b5d1] hover:bg-[#b9d6e8] text-black font-semibold border border-[#83b5d1] focus:outline-none focus:ring-2 focus:ring-[#83b5d1]/50 transition-colors duration-150"
               onClick={onClose}
             >
               Visit Greenhouse

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Menu, X, ChevronDown, ChevronRight, Package } from "lucide-react";
+import { Menu, ChevronDown, ChevronRight, Package } from "lucide-react";
 import { CalculatorForm, CalculationResults, InventoryCalculationResults } from "../components";
 import { WelcomeProfileModal, InventoryManagementModal } from "../components";
-import { useCustomRates, useCalculatorState } from "../hooks";
+import { SiteNavigationPanel } from "../components/layout";
+import { useCustomRates, useCalculatorState, useStableThresholds } from "../hooks";
 import { DataService } from "../services";
 import type { CalculationFormData } from "../schemas";
 import type { CalculationResult, CalculationParams, RecipeOverride, Data, InventoryCalculationResult, PriceInfo } from "../types/types";
@@ -24,7 +25,13 @@ const CalculatorFormWithContext: React.FC<{
   onFilterLowVolumeChange?: (v: boolean) => void;
   filterVolatile?: boolean;
   onFilterVolatileChange?: (v: boolean) => void;
-}> = ({ onSubmit, inventory, ownedAttributes, useInventory, onUseInventoryChange, filterLowVolume, onFilterLowVolumeChange, filterVolatile, onFilterVolatileChange }) => {
+  minBuyVolume?: number;
+  minSellVolume?: number;
+  onMinBuyVolumeChange?: (v: number) => void;
+  onMinSellVolumeChange?: (v: number) => void;
+  variant?: "target" | "levels" | "advanced" | "all" | "advancedLevels";
+  footer?: React.ReactNode;
+}> = ({ onSubmit, inventory, ownedAttributes, useInventory, onUseInventoryChange, filterLowVolume, onFilterLowVolumeChange, filterVolatile, onFilterVolatileChange, minBuyVolume, minSellVolume, onMinBuyVolumeChange, onMinSellVolumeChange, variant, footer }) => {
   const { setForm } = useCalculatorState();
   const stableOnSubmit = useCallback((data: CalculationFormData) => onSubmit(data, setForm), [onSubmit, setForm]);
   return (
@@ -38,6 +45,12 @@ const CalculatorFormWithContext: React.FC<{
       onFilterLowVolumeChange={onFilterLowVolumeChange}
       filterVolatile={filterVolatile}
       onFilterVolatileChange={onFilterVolatileChange}
+      minBuyVolume={minBuyVolume}
+      minSellVolume={minSellVolume}
+      onMinBuyVolumeChange={onMinBuyVolumeChange}
+      onMinSellVolumeChange={onMinSellVolumeChange}
+      variant={variant}
+      footer={footer}
     />
   );
 };
@@ -57,7 +70,9 @@ const performCalculation = async (
     setCalculating: (v: boolean) => void;
     setProgress: (p: WorkerProgress | null) => void;
   },
-  filterLowVolume?: boolean
+  filterLowVolume?: boolean,
+  minBuyVolume?: number,
+  minSellVolume?: number
 ): Promise<(() => void) | null> => {
   let isCancelled = false;
 
@@ -125,7 +140,7 @@ const performCalculation = async (
         } catch { /* ignore fetch errors */ }
       }
       if (cached) {
-        const excluded = getUnstableShardIds(cached.prices);
+        const excluded = getUnstableShardIds(cached.prices, undefined, minBuyVolume, minSellVolume);
         if (excluded.size > 0) excludedShardIds = [...excluded];
       }
     }
@@ -271,7 +286,7 @@ const performCalculation = async (
       } catch { /* ignore fetch errors */ }
     }
     if (cached) {
-      const excluded = getUnstableShardIds(cached.prices);
+      const excluded = getUnstableShardIds(cached.prices, undefined, minBuyVolume, minSellVolume);
       if (excluded.size > 0) {
         excludedShardIds = [...excluded];
         keepShardId = shardKey;
@@ -310,7 +325,6 @@ const performCalculation = async (
 const CalculatorPageContent: React.FC = () => {
   const { result, setResult, calculationData, setCalculationData, targetShardName, setTargetShardName, form, setForm } = useCalculatorState();
   const { customRates } = useCustomRates();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentParams, setCurrentParams] = useState<CalculationParams | null>(null);
   const [currentShardKey, setCurrentShardKey] = useState<string>("");
   const [currentQuantity, setCurrentQuantity] = useState<number>(1);
@@ -319,6 +333,7 @@ const CalculatorPageContent: React.FC = () => {
   const [progress, setProgress] = useState<WorkerProgress | null>(null);
   const [filterLowVolume, setFilterLowVolume] = useState(true);
   const [filterVolatile, setFilterVolatile] = useState(true);
+  const { minBuyVolume, minSellVolume, setMinBuyVolume, setMinSellVolume } = useStableThresholds();
   const [bazaarPrices, setBazaarPrices] = useState<Record<string, PriceInfo> | null>(null);
   const [suspiciousPriceShards, setSuspiciousPriceShards] = useState<Set<string>>(new Set());
 
@@ -382,7 +397,9 @@ const CalculatorPageContent: React.FC = () => {
                 setCalculating: setIsCalculating,
                 setProgress,
               },
-              filterLowVolume
+              filterLowVolume,
+              minBuyVolume,
+              minSellVolume
             );
           };
           submit(updatedForm).catch(console.error);
@@ -391,7 +408,7 @@ const CalculatorPageContent: React.FC = () => {
     } catch (error) {
       console.error("Failed to load shard from key:", error);
     }
-  }, [form, setForm, setTargetShardName, customRates, recipeOverrides, ownedAttributes, filterLowVolume]);
+  }, [form, setForm, setTargetShardName, customRates, recipeOverrides, ownedAttributes, filterLowVolume, minBuyVolume, minSellVolume]);
 
   // Handler for importing shard levels from profile
   const handleShardLevelsImport = useCallback((levels: {
@@ -597,7 +614,7 @@ const CalculatorPageContent: React.FC = () => {
           } catch { /* ignore fetch errors */ }
         }
         if (cached) {
-          const excluded = getUnstableShardIds(cached.prices);
+          const excluded = getUnstableShardIds(cached.prices, undefined, minBuyVolume, minSellVolume);
           if (excluded.size > 0) {
             excludedShardIds = [...excluded];
             keepShardId = shardKey;
@@ -628,7 +645,7 @@ const CalculatorPageContent: React.FC = () => {
     } finally {
       setIsCalculating(false);
     }
-  }, [customRates, inventory, disabledShards, recipeOverrides, filterLowVolume]);
+  }, [customRates, inventory, disabledShards, recipeOverrides, filterLowVolume, minBuyVolume, minSellVolume]);
 
   // ─── Standard debounced calculation ───
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -671,7 +688,7 @@ const CalculatorPageContent: React.FC = () => {
           };
 
           try {
-            cancelRef.current = await performCalculation(formData, customRates, recipeOverrides, callbacks, filterLowVolume);
+            cancelRef.current = await performCalculation(formData, customRates, recipeOverrides, callbacks, filterLowVolume, minBuyVolume, minSellVolume);
           } catch (err) {
             if (err instanceof Error && !err.message.includes("not found")) {
               console.error("Calculation failed:", err);
@@ -680,7 +697,7 @@ const CalculatorPageContent: React.FC = () => {
         }
       }, delay);
     },
-    [customRates, recipeOverrides, useInventory, performInventoryCalculation, filterLowVolume, setTargetShardName, setCurrentShardKey, setCurrentQuantity, setCurrentParams, setResult, setCalculationData]
+    [customRates, recipeOverrides, useInventory, performInventoryCalculation, filterLowVolume, minBuyVolume, minSellVolume, setTargetShardName, setCurrentShardKey, setCurrentQuantity, setCurrentParams, setResult, setCalculationData]
   );
 
   const formRef = useRef(form);
@@ -724,7 +741,7 @@ const CalculatorPageContent: React.FC = () => {
       debouncedCalculate(currentForm, 150).catch(console.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customRates, recipeOverrides, inventory, useInventory, filterLowVolume, debouncedCalculate]);
+  }, [customRates, recipeOverrides, inventory, useInventory, filterLowVolume, minBuyVolume, minSellVolume, debouncedCalculate]);
 
   // Initialize params from form for inventory mode display
   useEffect(() => {
@@ -781,75 +798,171 @@ const CalculatorPageContent: React.FC = () => {
   return (
     <>
       <WelcomeProfileModal open={showWelcome} onSelectProfile={handleSelectProfile} onClose={() => setShowWelcome(false)} />
-      <div className="min-h-screen space-y-3 py-4">
-        <div className="grid grid-cols-1 xl:grid-cols-7 gap-1 lg:gap-4">
-          {/* Configuration Panel */}
-          <div className="xl:col-span-2">
-            {/* Mobile toggle */}
-            <div className="xl:hidden mb-3">
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="
-                w-full px-3 py-2.5
-                bg-purple-500/10 border border-purple-500/20 hover:border-purple-400/30
-                rounded-md text-white hover:bg-purple-500/20
-                flex items-center justify-center space-x-2
-                transition-colors duration-200 font-medium text-sm cursor-pointer
-              "
-              >
-                {sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-                <span>{sidebarOpen ? "Hide" : "Show"} Configuration</span>
-              </button>
+        <div className="py-4 w-full flex flex-col lg:flex-row items-start gap-3">
+          {/* ── NAVIGATE — all the way left ── */}
+          <div className="shrink-0 w-full lg:w-56 lg:sticky lg:top-4">
+            <SiteNavigationPanel />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-col lg:flex-row items-start gap-3">
+            <div className="flex-1 min-w-0 space-y-3">
+            {/* ── TARGET (full width, same as Inventory) ── */}
+            <CalculatorFormWithContext
+              variant="target"
+              onSubmit={handleCalculate}
+              inventory={useInventory ? inventory : undefined}
+              ownedAttributes={ownedAttributes}
+              useInventory={useInventory}
+              onUseInventoryChange={handleUseInventoryChange}
+              filterLowVolume={filterLowVolume}
+              onFilterLowVolumeChange={setFilterLowVolume}
+              filterVolatile={filterVolatile}
+              onFilterVolatileChange={setFilterVolatile}
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
+              onMinBuyVolumeChange={setMinBuyVolume}
+              onMinSellVolumeChange={setMinSellVolume}
+              footer={
+                !result && !inventoryResult && !isCalculating ? (
+                  <div className="pt-3 pb-1 text-center">
+                    <div className="max-w-md mx-auto space-y-3">
+                      <div className="w-12 h-12 bg-[#83b5d1]/15 border border-[#83b5d1]/25 flex items-center justify-center mx-auto">
+                        <Menu className="w-6 h-6 text-[#83b5d1]" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-white tracking-tight">Ready to Calculate</h3>
+                      <h5 className="text-sm font-medium text-white/70">
+                        If this is your first time using SkyShards, check out the{" "}
+                        <a href="/guide" className="underline text-[#83b5d1] hover:text-[#b9d6e8]">
+                          guide!
+                        </a>
+                      </h5>
+                      <p className="text-white/50 text-sm mt-1">Configure your settings and select a shard to see optimal fusion paths</p>
+                    </div>
+                  </div>
+                ) : undefined
+              }
+            />
+
+        {/* ── RESULTS — full width top card ── */}
+        {(isCalculating || showInventoryResults || showStandardResults) && (
+        <div className="glass p-3 space-y-3">
+          {/* Loading Indicator */}
+          {isCalculating && (
+            <div>
+              <div className="flex items-center justify-between">
+                <div className="text-white text-sm font-medium">{progress?.message || "Calculating..."}</div>
+                {typeof progress?.progress === "number" && <div className="text-[#83b5d1] text-xs mono-label">{Math.round((progress.progress || 0) * 100)}%</div>}
+              </div>
+              <div className="mt-2 h-2 bg-white/10">
+                <div className="h-2 bg-[#83b5d1]" style={{ width: `${Math.min(100, Math.round((progress?.progress || 0) * 100))}%` }} />
+              </div>
             </div>
+          )}
 
-            <div className={`${sidebarOpen ? "block" : "hidden xl:block"} space-y-3`}>
-              {/* Inventory Section */}
-              <div className="bg-purple-500/10 border border-purple-500/20 rounded-md overflow-hidden">
-                  <button
-                    onClick={() => setInventoryExpanded(!inventoryExpanded)}
-                    className="w-full px-3 py-2.5 flex items-center justify-between text-white hover:bg-purple-500/20 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Package className="w-4 h-4 text-purple-400" />
-                      <span className="font-medium">Inventory</span>
-                      {inventory.size > 0 && (
-                        <span className="text-xs text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded">
-                          {inventory.size} shard{inventory.size !== 1 ? "s" : ""}
-                        </span>
-                      )}
-                    </div>
-                    {inventoryExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
+          {/* Inventory Results */}
+          {showInventoryResults && (
+            <InventoryCalculationResults
+              result={inventoryResult}
+              data={invCalculationData}
+              targetShardName={form.shard || "Unknown Shard"}
+              targetShard={form.shard || ""}
+              ironManView={form.ironManView}
+              expandedStates={expandedStates}
+              onToggle={handleToggle}
+              onExpandAll={handleExpandAll}
+              onCollapseAll={handleCollapseAll}
+              params={invCurrentParams}
+              recipeOverrides={recipeOverrides}
+              onRecipeOverridesUpdate={handleRecipeOverridesUpdate}
+              onResetRecipeOverrides={resetRecipeOverrides}
+              inventory={inventory}
+              disabledShards={disabledShards}
+              onDisabledShardsChange={setDisabledShards}
+              bazaarPrices={bazaarPrices}
+              filterLowVolume={filterLowVolume}
+              filterVolatile={filterVolatile}
+              suspiciousPriceShards={suspiciousPriceShards}
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
+            />
+          )}
 
-                  {inventoryExpanded && (
-                    <div className="border-t border-purple-500/20 p-3 space-y-3">
-                      {inventory.size === 0 ? (
-                        <p className="text-sm text-slate-400 text-center py-2">
-                          No inventory imported.
-                        </p>
-                      ) : (
-                        <div className="text-sm text-slate-300">
-                          <span className="text-white font-medium">{inventory.size}</span> shard type{inventory.size !== 1 ? "s" : ""} in inventory
-                          {ownedAttributes.size > 0 && (
-                            <span className="ml-2">
-                              • <span className="text-white font-medium">{ownedAttributes.size}</span> attribute{ownedAttributes.size !== 1 ? "s" : ""}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => setShowInventoryModal(true)}
-                        className="w-full px-3 py-2 bg-purple-500/20 border border-purple-500/30 hover:border-purple-400/40 rounded-md text-purple-300 hover:bg-purple-500/30 flex items-center justify-center gap-2 transition-colors duration-200 text-sm font-medium cursor-pointer"
-                      >
-                        <Package className="w-4 h-4" />
-                        <span>Manage Inventory</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
+          {/* Standard Results */}
+          {showStandardResults && (
+            <CalculationResults
+              result={result!}
+              data={calculationData!}
+              targetShardName={targetShardName}
+              targetShard={currentShardKey}
+              requiredQuantity={currentQuantity}
+              params={currentParams!}
+              onResultUpdate={handleResultUpdate}
+              recipeOverrides={recipeOverrides}
+              onRecipeOverridesUpdate={handleRecipeOverridesUpdate}
+              onResetRecipeOverrides={resetRecipeOverrides}
+              ironManView={form.ironManView}
+              materialsOnly={form.materialsOnly}
+              filterLowVolume={filterLowVolume}
+              filterVolatile={filterVolatile}
+              bazaarPrices={bazaarPrices}
+              suspiciousPriceShards={suspiciousPriceShards}
+              minBuyVolume={minBuyVolume}
+              minSellVolume={minSellVolume}
+            />
+          )}
+        </div>
+        )}
 
-              {/* Calculator Settings Form */}
+        {/* ── INVENTORY ── */}
+        <div className="glass overflow-hidden">
+            <button
+              onClick={() => setInventoryExpanded(!inventoryExpanded)}
+              className="w-full px-3 py-2.5 flex items-center justify-between text-white hover:bg-[#83b5d1]/10 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-2">
+                <Package className="w-4 h-4 text-[#83b5d1]" />
+                <span className="font-medium">Inventory</span>
+                {inventory.size > 0 && (
+                  <span className="text-xs text-[#83b5d1] bg-[#83b5d1]/15 px-1.5 py-0.5">
+                    {inventory.size} shard{inventory.size !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+              {inventoryExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            </button>
+
+            {inventoryExpanded && (
+              <div className="border-t border-[#726e97] p-3 space-y-3">
+                {inventory.size === 0 ? (
+                  <p className="text-sm text-white/60 text-center py-2">
+                    No inventory imported.
+                  </p>
+                ) : (
+                  <div className="text-sm text-white/70">
+                    <span className="text-white font-medium">{inventory.size}</span> shard type{inventory.size !== 1 ? "s" : ""} in inventory
+                    {ownedAttributes.size > 0 && (
+                      <span className="ml-2">
+                        • <span className="text-white font-medium">{ownedAttributes.size}</span> attribute{ownedAttributes.size !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <button
+                  onClick={() => setShowInventoryModal(true)}
+                  className="w-full px-3 py-2 bg-[#83b5d1]/15 border border-[#83b5d1]/25 hover:border-[#83b5d1]/40 text-[#83b5d1] hover:bg-[#83b5d1]/25 flex items-center justify-center gap-2 transition-colors duration-200 text-sm font-medium cursor-pointer"
+                >
+                  <Package className="w-4 h-4" />
+                  <span>Manage Inventory</span>
+                </button>
+              </div>
+            )}
+          </div>
+      </div>
+
+            {/* ── ADVANCED — right sidebar, like NAVIGATE ── */}
+            <div className="shrink-0 w-full lg:w-80 lg:sticky lg:top-4">
               <CalculatorFormWithContext
+                variant="advancedLevels"
                 onSubmit={handleCalculate}
                 inventory={useInventory ? inventory : undefined}
                 ownedAttributes={ownedAttributes}
@@ -859,92 +972,14 @@ const CalculatorPageContent: React.FC = () => {
                 onFilterLowVolumeChange={setFilterLowVolume}
                 filterVolatile={filterVolatile}
                 onFilterVolatileChange={setFilterVolatile}
+                minBuyVolume={minBuyVolume}
+                minSellVolume={minSellVolume}
+                onMinBuyVolumeChange={setMinBuyVolume}
+                onMinSellVolumeChange={setMinSellVolume}
               />
             </div>
           </div>
-          {/* Results Panel */}
-          <div className="xl:col-span-5 space-y-3">
-            {/* Loading Indicator */}
-            {isCalculating && (
-              <div className="bg-purple-500/10 border border-purple-500/20 rounded-md p-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-white text-sm font-medium">{progress?.message || "Calculating..."}</div>
-                  {typeof progress?.progress === "number" && <div className="text-purple-300 text-xs">{Math.round((progress.progress || 0) * 100)}%</div>}
-                </div>
-                <div className="mt-2 h-2 bg-white/10 rounded">
-                  <div className="h-2 bg-purple-400 rounded" style={{ width: `${Math.min(100, Math.round((progress?.progress || 0) * 100))}%` }} />
-                </div>
-              </div>
-            )}
-
-            {/* Inventory Results */}
-            {showInventoryResults && (
-              <InventoryCalculationResults
-                result={inventoryResult}
-                data={invCalculationData}
-                targetShardName={form.shard || "Unknown Shard"}
-                targetShard={form.shard || ""}
-                ironManView={form.ironManView}
-                expandedStates={expandedStates}
-                onToggle={handleToggle}
-                onExpandAll={handleExpandAll}
-                onCollapseAll={handleCollapseAll}
-                params={invCurrentParams}
-                recipeOverrides={recipeOverrides}
-                onRecipeOverridesUpdate={handleRecipeOverridesUpdate}
-                onResetRecipeOverrides={resetRecipeOverrides}
-                inventory={inventory}
-                disabledShards={disabledShards}
-                onDisabledShardsChange={setDisabledShards}
-                bazaarPrices={bazaarPrices}
-                filterLowVolume={filterLowVolume}
-                filterVolatile={filterVolatile}
-                suspiciousPriceShards={suspiciousPriceShards}
-              />
-            )}
-
-            {/* Standard Results */}
-            {showStandardResults && (
-              <CalculationResults
-                result={result!}
-                data={calculationData!}
-                targetShardName={targetShardName}
-                targetShard={currentShardKey}
-                requiredQuantity={currentQuantity}
-                params={currentParams!}
-                onResultUpdate={handleResultUpdate}
-                recipeOverrides={recipeOverrides}
-                onRecipeOverridesUpdate={handleRecipeOverridesUpdate}
-                onResetRecipeOverrides={resetRecipeOverrides}
-                ironManView={form.ironManView}
-                materialsOnly={form.materialsOnly}
-                filterLowVolume={filterLowVolume}
-                filterVolatile={filterVolatile}
-                bazaarPrices={bazaarPrices}
-                suspiciousPriceShards={suspiciousPriceShards}
-              />
-            )}
-
-            {/* Empty State */}
-            {!result && !inventoryResult && !isCalculating && (
-              <div className="text-center py-10 bg-white/5 border border-white/10 rounded-md">
-                <div className="max-w-md mx-auto space-y-3">
-                  <div className="w-12 h-12 bg-purple-500/20 border border-purple-500/20 rounded-md flex items-center justify-center mx-auto">
-                    <Menu className="w-6 h-6 text-purple-400" />
-                  </div>
-                  <h3 className="text-lg font-medium text-white">Ready to Calculate</h3>
-                  <h5 className="text-sm font-medium text-white">
-                    If this is your first time using SkyShards, check out the{" "}
-                    <a href="/guide" className="underline text-purple-300 hover:text-purple-200">
-                      guide!
-                    </a>
-                  </h5>
-                  <p className="text-slate-400 text-sm mt-1">Configure your settings and select a shard to see optimal fusion paths</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+      </div>
       </div>
 
       {/* Inventory Management Modal */}

@@ -143,6 +143,8 @@ export interface CalculationResultsProps {
   filterVolatile?: boolean;
   bazaarPrices?: Record<string, PriceInfo> | null;
   suspiciousPriceShards?: Set<string>;
+  minBuyVolume?: number;
+  minSellVolume?: number;
 }
 
 export interface HistoryPoint {

@@ -5,11 +5,9 @@ import type { RecipeTree, CalculationResultsProps } from "../../types/types";
 import { RecipeTreeNode } from "../tree";
 import { RecipeOverrideManager } from "../forms";
 import { SummaryCard, MaterialItem, useToast } from "../ui";
+import { DEFAULT_MIN_DAILY_BUY_VOLUME, DEFAULT_MIN_DAILY_SELL_VOLUME } from "../../utilities/stableFilter";
 import pako from "pako";
 import { CopyTreeModal } from "../modals";
-
-const MIN_BUY_VOLUME = 5000;
-const MIN_SELL_VOLUME = 5000;
 
 // Utility function to manage expanded states
 const useTreeExpansion = (tree: RecipeTree | null) => {
@@ -81,6 +79,8 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
   filterVolatile = true,
   bazaarPrices = null,
   suspiciousPriceShards,
+  minBuyVolume = DEFAULT_MIN_DAILY_BUY_VOLUME,
+  minSellVolume = DEFAULT_MIN_DAILY_SELL_VOLUME,
 }) => {
   const { expandedStates, handleExpandAll, handleCollapseAll, handleNodeToggle } = useTreeExpansion(result.tree);
   const [copyModalOpen, setCopyModalOpen] = useState(false);
@@ -386,7 +386,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
       {!ironManView && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-300">
           <Info className="w-4 h-4 flex-shrink-0" />
-          <span>Volume d'achat quotidien minimum : <strong>{formatLargeNumber(MIN_BUY_VOLUME)} shards</strong> pour que la stratégie soit viable.</span>
+          <span>Volume d'achat quotidien minimum : <strong>{formatLargeNumber(minBuyVolume)} shards</strong> pour que la stratégie soit viable.</span>
         </div>
       )}
       {/* Materials Needed */}
@@ -458,10 +458,10 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
             .filter(([shardId]) => {
               if (ironManView || !bazaarPrices) return true;
               const priceInfo = bazaarPrices[shardId];
-              // "Stable" = filtre volume : dailyBuyVolume < 5000
+              // "Stable" = filtre volume : dailyBuyVolume < minBuyVolume
               if (filterLowVolume) {
                 if (!priceInfo) return false;
-                if (priceInfo.dailyBuyVolume < MIN_BUY_VOLUME || priceInfo.dailySellVolume < MIN_SELL_VOLUME) return false;
+                if (priceInfo.dailyBuyVolume < minBuyVolume || priceInfo.dailySellVolume < minSellVolume) return false;
               }
               // "Safe" = anomalie prix → ne filtre PAS (warning dans RecipeTreeNode)
               return true;
@@ -491,7 +491,7 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
       {!materialsOnly && result.tree && (
       <div className="bg-slate-800 border border-slate-600 rounded-md p-3">
         <div className="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900">
-          <div className="min-w-[810px]">
+          <div className="min-w-0">
             <RecipeOverrideManager
               params={params}
               recipeOverrides={recipeOverrides}
@@ -551,6 +551,8 @@ export const CalculationResults: React.FC<CalculationResultsProps> = ({
                     filterVolatile={filterVolatile}
                     suspiciousPriceShards={suspiciousPriceShards}
                     substitutedShards={result.substitutedShards}
+                    minBuyVolume={minBuyVolume}
+                    minSellVolume={minSellVolume}
                   />
                   )}
                 </>

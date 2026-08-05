@@ -508,31 +508,31 @@ export const InventoryManagementModal: React.FC<InventoryManagementModalProps> =
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 mt-4">
+          <div className="flex mt-4 border border-[#726e97]">
             <button
               onClick={() => setActiveTab("shards")}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${
+              className={`flex-1 px-4 py-2 text-sm font-medium transition-colors duration-150 cursor-pointer flex items-center justify-center gap-2 ${
                 activeTab === "shards"
-                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
-                  : "bg-slate-800 text-slate-400 border border-slate-600 hover:bg-slate-700"
+                  ? "bg-[#83b5d1] text-black"
+                  : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"
               }`}
             >
               Shards
               {inventory.size > 0 && (
-                <span className="text-xs bg-purple-500/30 px-1.5 py-0.5 rounded">{inventory.size}</span>
+                <span className={`text-xs px-1.5 py-0.5 ${activeTab === "shards" ? "bg-black/30" : "bg-purple-500/30"}`}>{inventory.size}</span>
               )}
             </button>
             <button
               onClick={() => setActiveTab("attributes")}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${
+              className={`flex-1 px-4 py-2 text-sm font-medium transition-colors duration-150 cursor-pointer flex items-center justify-center gap-2 ${
                 activeTab === "attributes"
-                  ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
-                  : "bg-slate-800 text-slate-400 border border-slate-600 hover:bg-slate-700"
+                  ? "bg-[#83b5d1] text-black"
+                  : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"
               }`}
             >
               Attributes
               {ownedAttributes.size > 0 && (
-                <span className="text-xs bg-purple-500/30 px-1.5 py-0.5 rounded">{ownedAttributes.size}</span>
+                <span className={`text-xs px-1.5 py-0.5 ${activeTab === "attributes" ? "bg-black/30" : "bg-purple-500/30"}`}>{ownedAttributes.size}</span>
               )}
             </button>
           </div>

@@ -1,5 +1,5 @@
 import React from "react";
-import { Zap, RotateCcw, Settings, TriangleAlert, Layers, ShieldCheck, AlertTriangle } from "lucide-react";
+import { Zap, RotateCcw, TriangleAlert, Layers, ShieldCheck, AlertTriangle } from "lucide-react";
 import { type CalculationFormData } from "../../schemas";
 import { ShardAutocomplete, MoneyInput } from "./inputs";
 import { useCalculatorState, useShards } from "../../hooks";
@@ -7,6 +7,7 @@ import { LevelDropdown, KuudraDropdown } from "../calculator";
 import {MAX_QUANTITIES, SHARD_DESCRIPTIONS} from "../../constants";
 import { isValidShardName, formatShardDescription } from "../../utilities";
 import { Tooltip, ToggleSwitch } from "../ui";
+import { StableThresholdInputs } from "../common";
 import type { ShardWithKey } from "../../types/types";
 import { MultiSelectShardModal } from "../modals";
 import { DataService } from "../../services";
@@ -21,6 +22,12 @@ interface CalculatorFormProps {
   onFilterLowVolumeChange?: (v: boolean) => void;
   filterVolatile?: boolean;
   onFilterVolatileChange?: (v: boolean) => void;
+  minBuyVolume?: number;
+  minSellVolume?: number;
+  onMinBuyVolumeChange?: (v: number) => void;
+  onMinSellVolumeChange?: (v: number) => void;
+  variant?: "target" | "levels" | "advanced" | "all" | "advancedLevels";
+  footer?: React.ReactNode;
 }
 
 type LevelKey = keyof Pick<
@@ -28,7 +35,7 @@ type LevelKey = keyof Pick<
   "newtLevel" | "salamanderLevel" | "lizardKingLevel" | "leviathanLevel" | "pythonLevel" | "kingCobraLevel" | "seaSerpentLevel" | "tiamatLevel" | "crocodileLevel"
 >;
 
-export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedAttributes, useInventory, onUseInventoryChange, filterLowVolume, onFilterLowVolumeChange, filterVolatile, onFilterVolatileChange }) => {
+export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedAttributes, useInventory, onUseInventoryChange, filterLowVolume, onFilterLowVolumeChange, filterVolatile, onFilterVolatileChange, minBuyVolume, minSellVolume, onMinBuyVolumeChange, onMinSellVolumeChange, variant = "all", footer }) => {
   const { form, setForm, saveEnabled, setSaveEnabledState } = useCalculatorState();
   const { shards } = useShards();
 
@@ -260,14 +267,17 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
   );
 
   return (
-    <div className="bg-slate-800/40 border border-slate-600/30 rounded-md p-3 space-y-3">
-      <form onSubmit={(e) => e.preventDefault()} className="space-y-3">
+    <>
+      {(variant === "all" || variant === "target") && (
+      <form onSubmit={(e) => e.preventDefault()} className="glass h-full">
+        <div className="title-bar px-3 py-1.5 mono-label text-[#83b5d1]/70">+--- TARGET ---+</div>
+        <div className="p-3 space-y-3">
         {/* Profile Mode Buttons */}
-        <div className="flex space-x-2">
+        <div className="flex border border-[#726e97]">
           <button
             type="button"
-            className={`px-3 py-1.5 font-medium rounded-md text-xs transition-colors duration-200 flex-1 border cursor-pointer ${
-              form.ironManView ? "bg-white/20 text-white border-white/30" : "bg-slate-700/50 hover:bg-slate-600/50 text-slate-400 border-slate-600/50 hover:border-slate-500/50"
+            className={`flex-1 px-3 py-1.5 font-medium text-xs transition-colors duration-150 cursor-pointer ${
+              form.ironManView ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"
             }`}
             onClick={() => handleInputChange("ironManView", true)}
           >
@@ -275,8 +285,8 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
           </button>
           <button
             type="button"
-            className={`px-3 py-1.5 font-medium rounded-md text-xs transition-colors duration-200 flex-1 border cursor-pointer ${
-              !form.ironManView ? "bg-blue-500/30 text-blue-200 border-blue-400/50" : "bg-slate-700/50 hover:bg-slate-600/50 text-slate-400 border-slate-600/50 hover:border-slate-500/50"
+            className={`flex-1 px-3 py-1.5 font-medium text-xs transition-colors duration-150 cursor-pointer ${
+              !form.ironManView ? "bg-[#83b5d1] text-black" : "text-[#83b5d1]/70 hover:text-[#83b5d1] hover:bg-[#83b5d1]/10"
             }`}
             onClick={() => handleInputChange("ironManView", false)}
           >
@@ -285,7 +295,7 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
         </div>
 
         {/* Use Inventory + Auto Save toggles */}
-        <div className="flex justify-between gap-6 mb-3">
+        <div className="flex flex-col gap-2 mb-3">
           {onUseInventoryChange && (
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-slate-200">Use Inventory</span>
@@ -335,31 +345,10 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
         {/* Target Shard or Select Shards */}
         <div className="space-y-2">
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="mb-2">
               <div className="flex items-center gap-2 text-sm font-medium text-emerald-300">
                 <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
                 {form.materialsOnly ? "Select Shards" : "Target Shard"}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-white">Materials Only</span>
-                <Tooltip content="Calculate combined materials for multiple shards without showing the fusion tree. Does not work with use inventory"></Tooltip>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={form.materialsOnly}
-                  onClick={() => handleInputChange("materialsOnly", !form.materialsOnly)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full border border-white/10 transition-colors duration-200 cursor-pointer
-                    ${form.materialsOnly ? "bg-blue-600" : "bg-white/5"}
-                    hover:border-blue-400`}
-                  style={{ boxShadow: "none" }}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full shadow transition-transform duration-200 border border-white/10
-                    ${form.materialsOnly ? "bg-blue-400" : "bg-slate-300/70"}
-                    ${form.materialsOnly ? "translate-x-4" : "translate-x-0.5"}`}
-                    style={{ paddingLeft: "1px" }}
-                  />
-                </button>
               </div>
             </div>
             {form.materialsOnly && form.ironManView ? (
@@ -413,8 +402,77 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
               </>
             )}
           </div>
-        {!form.materialsOnly && (
-            <div className="flex gap-1.5">
+        </div>
+
+        {/* Multi-Select Shard Modal */}
+        <MultiSelectShardModal
+          isOpen={isMultiSelectModalOpen}
+          onClose={() => setIsMultiSelectModalOpen(false)}
+          shards={allShards}
+          onDone={handleMultiSelectDone}
+          initialSelections={
+            new Map(
+              (form.shardQuantities || []).map((item) => [item.shard.key, item.quantity])
+            )
+          }
+          ownedAttributes={ownedAttributes}
+        />
+
+        </div>
+        {footer}
+
+        {/* Controls — below the Ready to Calculate block */}
+        <div className="p-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {onFilterLowVolumeChange !== undefined && onFilterVolatileChange !== undefined && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onFilterLowVolumeChange(!filterLowVolume)}
+                  className={`px-2 py-1.5 text-xs border transition-colors cursor-pointer ${
+                    filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
+                  }`}
+                  title={filterLowVolume ? `Filtrer les shards avec volume d'achat < ${minBuyVolume}` : "Showing all shards"}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
+                  {filterLowVolume ? "Stable" : "All"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onFilterVolatileChange(!filterVolatile)}
+                  className={`px-2 py-1.5 text-xs border transition-colors cursor-pointer ${
+                    filterVolatile ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
+                  }`}
+                  title={filterVolatile ? "Détection d'anomalie de prix via historique 24h" : "Showing all shards"}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
+                  {filterVolatile ? "Safe" : "All"}
+                </button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-white">Materials Only</span>
+              <Tooltip content="Calculate combined materials for multiple shards without showing the fusion tree. Does not work with use inventory"></Tooltip>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.materialsOnly}
+                onClick={() => handleInputChange("materialsOnly", !form.materialsOnly)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full border border-white/10 transition-colors duration-200 cursor-pointer
+                  ${form.materialsOnly ? "bg-blue-600" : "bg-white/5"}
+                  hover:border-blue-400`}
+                style={{ boxShadow: "none" }}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full shadow transition-transform duration-200 border border-white/10
+                  ${form.materialsOnly ? "bg-blue-400" : "bg-slate-300/70"}
+                  ${form.materialsOnly ? "translate-x-4" : "translate-x-0.5"}`}
+                  style={{ paddingLeft: "1px" }}
+                />
+              </button>
+            </div>
+            {!form.materialsOnly && (
+            <div className="flex gap-1.5 flex-1 min-w-[180px]">
               <div className="flex-1">
                 <label className="block text-xs font-medium text-slate-300 mb-1">Quantity</label>
                 <input
@@ -456,61 +514,66 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
                 );
               })()}
             </div>
-          )}
-        </div>
-
-        {/* Multi-Select Shard Modal */}
-        <MultiSelectShardModal
-          isOpen={isMultiSelectModalOpen}
-          onClose={() => setIsMultiSelectModalOpen(false)}
-          shards={allShards}
-          onDone={handleMultiSelectDone}
-          initialSelections={
-            new Map(
-              (form.shardQuantities || []).map((item) => [item.shard.key, item.quantity])
-            )
-          }
-          ownedAttributes={ownedAttributes}
-        />
-
-        {/* Settings */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              <Settings className="w-4 h-4 text-purple-400" />
-              Settings
-            </h3>
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={handleMaxStats}
-                className="
-                  px-2 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 
-                  text-amber-400 font-medium rounded-md text-xs
-                  border border-amber-500/20 hover:border-amber-500/30
-                  transition-colors duration-200 flex items-center space-x-1 cursor-pointer
-                "
-              >
-                <Zap className="w-3 h-3" />
-                <span>Max Stats</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleReset}
-                className="
-                  px-2 py-1.5 bg-red-500/20 hover:bg-red-500/30 
-                  text-red-400 font-medium rounded-md text-xs
-                  border border-red-500/20 hover:border-red-500/30
-                  transition-colors duration-200 flex items-center space-x-1 cursor-pointer
-                "
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset Stats</span>
-              </button>
-            </div>
+            )}
           </div>
+        </div>
+      </form>
+      )}
 
+      {(variant === "all" || variant === "levels") && (
+      <form onSubmit={(e) => e.preventDefault()} className="glass h-full">
+        <div className="title-bar px-3 py-1.5 mono-label text-[#83b5d1]/70">+--- SHARD LEVELS ---+</div>
+        <div className="p-3 space-y-2">
+          <div className="grid grid-cols-3 gap-1.5">
+            {levelItems.map(({ key, label, shardId }) => {
+              const shard = shards.find((s) => s.id === shardId);
+              const shardDesc = SHARD_DESCRIPTIONS[shardId as keyof typeof SHARD_DESCRIPTIONS];
+              return (
+                <LevelDropdown
+                  key={key}
+                  value={form[key] as number}
+                  onChange={handleLevelChange(key)}
+                  label={label}
+                  tooltipTitle={shardDesc?.title}
+                  tooltipContent={formatShardDescription(shardDesc?.description || "No description available.")}
+                  tooltipShardName={label}
+                  tooltipShardIcon={shardId}
+                  tooltipRarity={shard?.rarity}
+                  tooltipFamily={shard?.family}
+                  tooltipType={shard?.type}
+                  tooltipWarning={key === "crocodileLevel" ? "Warning: May slow calculations significantly" : undefined}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </form>
+      )}
+
+      {(variant === "all" || variant === "advanced" || variant === "advancedLevels") && (
+      <form onSubmit={(e) => e.preventDefault()} className="glass h-full">
+        <div className="title-bar px-2 py-1 flex items-center justify-between mono-label text-[#83b5d1]/70">
+          <span>+--- ADVANCED ---+</span>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={handleMaxStats}
+              className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30 hover:border-amber-500/50 transition-colors duration-150 flex items-center gap-1 cursor-pointer"
+            >
+              <Zap className="w-3 h-3" />
+              <span>MAX STATS</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="px-2 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 hover:border-red-500/50 transition-colors duration-150 flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>RESET</span>
+            </button>
+          </div>
+        </div>
+        <div className="p-2 space-y-2">
           <div className="space-y-2">
             {/* Hunter Fortune */}
             {form.ironManView && (
@@ -592,65 +655,16 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
               {!form.ironManView && (
                 <ToggleSwitch id="instantBuyPrices" label="Use Instant Buy Prices" checked={form.instantBuyPrices} onChange={(checked) => handleInputChange("instantBuyPrices", checked)} />
               )}
-              {onFilterLowVolumeChange !== undefined && onFilterVolatileChange !== undefined && (
-                <div className="flex items-center gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => onFilterLowVolumeChange(!filterLowVolume)}
-                    className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${
-                      filterLowVolume ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
-                    }`}
-                    title={filterLowVolume ? "Filtrer les shards avec volume d'achat < 5000" : "Showing all shards"}
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5 inline-block mr-1" />
-                    {filterLowVolume ? "Stable" : "All"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onFilterVolatileChange(!filterVolatile)}
-                    className={`px-2 py-1.5 rounded-md text-xs border transition-colors cursor-pointer ${
-                      filterVolatile ? "bg-amber-500/20 text-amber-300 border-amber-500/30" : "bg-slate-700/50 text-slate-400 border-slate-600/50 hover:text-slate-300"
-                    }`}
-                    title={filterVolatile ? "Détection d'anomalie de prix via historique 24h" : "Showing all shards"}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 inline-block mr-1" />
-                    {filterVolatile ? "Safe" : "All"}
-                  </button>
-                </div>
+              {filterLowVolume && onMinBuyVolumeChange !== undefined && onMinSellVolumeChange !== undefined && (
+                <StableThresholdInputs
+                  minBuyVolume={minBuyVolume ?? 0}
+                  minSellVolume={minSellVolume ?? 0}
+                  onMinBuyVolumeChange={onMinBuyVolumeChange}
+                  onMinSellVolumeChange={onMinSellVolumeChange}
+                />
               )}
             </div>
           </div>
-        </div>
-
-        {/* Shard Levels */}
-        <div className="space-y-2">
-          <h3 className="flex items-center gap-2 text-sm font-medium text-blue-300">
-            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-            Shard Levels
-          </h3>
-          <div className="grid grid-cols-3 gap-1.5">
-            {levelItems.map(({ key, label, shardId }) => {
-              const shard = shards.find((s) => s.id === shardId);
-              const shardDesc = SHARD_DESCRIPTIONS[shardId as keyof typeof SHARD_DESCRIPTIONS];
-              return (
-                <LevelDropdown
-                  key={key}
-                  value={form[key] as number}
-                  onChange={handleLevelChange(key)}
-                  label={label}
-                  tooltipTitle={shardDesc?.title}
-                  tooltipContent={formatShardDescription(shardDesc?.description || "No description available.")}
-                  tooltipShardName={label}
-                  tooltipShardIcon={shardId}
-                  tooltipRarity={shard?.rarity}
-                  tooltipFamily={shard?.family}
-                  tooltipType={shard?.type}
-                  tooltipWarning={key === "crocodileLevel" ? "Warning: May slow calculations significantly" : undefined}
-                />
-              );
-            })}
-          </div>
-        </div>
 
         {/* Craft Penalty Input */}
         <div className="space-y-2">
@@ -779,23 +793,52 @@ export const CalculatorForm: React.FC<CalculatorFormProps> = ({ onSubmit, ownedA
           </div>
         )}
 
-        <div className="flex justify-end mt-6">
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm("Are you sure you want to restart everything? This will clear all saved data and reload the page.")) {
-                localStorage.clear();
-                const url = window.location.href.split("?")[0];
-                window.location.href = url + "?nocache=" + Date.now();
-              }
-            }}
-            className="px-2 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium rounded-md text-xs border border-red-500/20 hover:border-red-500/30 transition-colors duration-200 flex items-center space-x-1.5 cursor-pointer"
-          >
-            <TriangleAlert className="w-3 h-3" />
-            <span>Reset Everything</span>
-          </button>
+          {variant === "advancedLevels" && (
+            <div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {levelItems.map(({ key, label, shardId }) => {
+                  const shard = shards.find((s) => s.id === shardId);
+                  const shardDesc = SHARD_DESCRIPTIONS[shardId as keyof typeof SHARD_DESCRIPTIONS];
+                  return (
+                    <LevelDropdown
+                      key={key}
+                      value={form[key] as number}
+                      onChange={handleLevelChange(key)}
+                      label={label}
+                      tooltipTitle={shardDesc?.title}
+                      tooltipContent={formatShardDescription(shardDesc?.description || "No description available.")}
+                      tooltipShardName={label}
+                      tooltipShardIcon={shardId}
+                      tooltipRarity={shard?.rarity}
+                      tooltipFamily={shard?.family}
+                      tooltipType={shard?.type}
+                      tooltipWarning={key === "crocodileLevel" ? "Warning: May slow calculations significantly" : undefined}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end mt-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm("Are you sure you want to restart everything? This will clear all saved data and reload the page.")) {
+                  localStorage.clear();
+                  const url = window.location.href.split("?")[0];
+                  window.location.href = url + "?nocache=" + Date.now();
+                }
+              }}
+              className="px-2 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium text-xs border border-red-500/30 hover:border-red-500/50 transition-colors duration-150 flex items-center space-x-1.5 cursor-pointer"
+            >
+              <TriangleAlert className="w-3 h-3" />
+              <span>Reset Everything</span>
+            </button>
+          </div>
         </div>
       </form>
-    </div>
+      )}
+    </>
   );
 };

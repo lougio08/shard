@@ -6,6 +6,7 @@ import { InventoryRecipeTreeNode } from "../tree";
 import { SummaryCard, MaterialItem, useToast } from "../ui";
 import { RecipeOverrideManager } from "../forms";
 import { ShardsUsed } from "./ShardsUsed";
+import { DEFAULT_MIN_DAILY_BUY_VOLUME, DEFAULT_MIN_DAILY_SELL_VOLUME } from "../../utilities/stableFilter";
 
 interface InventoryCalculationResultsProps {
   result: InventoryCalculationResult;
@@ -28,6 +29,8 @@ interface InventoryCalculationResultsProps {
   filterLowVolume?: boolean;
   filterVolatile?: boolean;
   suspiciousPriceShards?: Set<string>;
+  minBuyVolume?: number;
+  minSellVolume?: number;
 }
 
 export const InventoryCalculationResults: React.FC<InventoryCalculationResultsProps> = ({
@@ -51,6 +54,8 @@ export const InventoryCalculationResults: React.FC<InventoryCalculationResultsPr
   filterLowVolume,
   filterVolatile,
   suspiciousPriceShards,
+  minBuyVolume = DEFAULT_MIN_DAILY_BUY_VOLUME,
+  minSellVolume = DEFAULT_MIN_DAILY_SELL_VOLUME,
 }) => {
   const { toast } = useToast();
   const targetShardData = data.shards[targetShard];
@@ -249,6 +254,8 @@ export const InventoryCalculationResults: React.FC<InventoryCalculationResultsPr
                       filterVolatile={filterVolatile}
                       suspiciousPriceShards={suspiciousPriceShards}
                       substitutedShards={result.substitutedShards}
+                      minBuyVolume={minBuyVolume}
+                      minSellVolume={minSellVolume}
                     />
                   </>
                 )}
